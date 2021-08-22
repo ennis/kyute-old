@@ -1,11 +1,12 @@
 use crate::{
-    bindings::Windows::Win32::Direct2D::ID2D1PathGeometry1,
+    bindings::Windows::Win32::Direct2D::{
+        ID2D1PathGeometry1, D2D1_FIGURE_BEGIN, D2D1_FIGURE_END, D2D_POINT_2F,
+    },
     platform::Platform,
 };
 pub use svgtypes::{Path, PathParser, PathSegment};
 use thiserror::Error;
 use windows::Interface;
-use crate::bindings::Windows::Win32::Direct2D::{D2D1_FIGURE_BEGIN, D2D1_FIGURE_END, D2D_POINT_2F};
 
 pub struct PathGeometry(pub(crate) ID2D1PathGeometry1);
 
@@ -32,7 +33,9 @@ impl PathGeometry {
             let path_geometry = factory
                 .CreatePathGeometry(&mut path_geometry)
                 .and_some(path_geometry)
-                .unwrap().cast::<ID2D1PathGeometry1>().unwrap();
+                .unwrap()
+                .cast::<ID2D1PathGeometry1>()
+                .unwrap();
             let mut geometry_sink = None;
             let geometry_sink = path_geometry
                 .Open(&mut geometry_sink)

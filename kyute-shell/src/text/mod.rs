@@ -16,10 +16,9 @@ use crate::bindings::Windows::Win32::{
         DWRITE_FONT_WEIGHT, DWRITE_HIT_TEST_METRICS, DWRITE_LINE_METRICS, DWRITE_TEXT_METRICS,
         DWRITE_TEXT_RANGE,
     },
-    SystemServices::BOOL,
+    SystemServices::{BOOL, PWSTR},
 };
-use windows::{IUnknown, HRESULT, Interface};
-use crate::bindings::Windows::Win32::SystemServices::PWSTR;
+use windows::{IUnknown, Interface, HRESULT};
 
 /// Text drawing effects.
 pub trait DrawingEffect {
@@ -148,6 +147,17 @@ impl TextFormat {
     pub fn builder<'a>() -> TextFormatBuilder<'a> {
         TextFormatBuilder::new()
     }
+
+    pub fn as_raw(&self) -> &IDWriteTextFormat {
+        &self.0
+    }
+
+    /// Returns the font size in DIPs.
+    pub fn font_size(&self) -> f32 {
+        unsafe {
+            self.0.GetFontSize()
+        }
+    }
 }
 
 /// Builder pattern for `TextFormat`.
@@ -194,7 +204,7 @@ impl<'a> TextFormatBuilder<'a> {
                     self.style.to_dwrite(),
                     self.stretch.to_dwrite(),
                     self.size,
-                    "en-US",    // TODO
+                    "en-US", // TODO
                     &mut text_format,
                 )
                 .and_some(text_format)?;
@@ -330,9 +340,7 @@ pub struct TextLayout {
 impl TextLayout {
     pub fn new(text: &str, format: &TextFormat, layout_box_size: Size) -> Result<TextLayout> {
         let platform = Platform::instance();
-        let mut wtext : Vec<u16> = text.encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
+        let mut wtext: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
 
         unsafe {
             let mut text_layout = None;
@@ -550,7 +558,7 @@ impl TextLayout {
         }
     }
 
-    pub(crate) fn as_raw(&self) -> &IDWriteTextLayout {
+    pub fn as_raw(&self) -> &IDWriteTextLayout {
         &self.text_layout
     }
 }

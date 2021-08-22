@@ -5,7 +5,7 @@ use std::{
     collections::{Bound, VecDeque},
     marker::PhantomData,
     mem,
-    ops::{Deref, RangeBounds},
+    ops::{Deref, Index, IndexMut, RangeBounds},
     ptr,
     ptr::NonNull,
 };
@@ -28,9 +28,10 @@ impl<T> RawVec<T> {
         unsafe {
             let elem_size = mem::size_of::<T>();
 
-            let (new_cap, ptr) = if self.cap == 0 {
-                let ptr = alloc::alloc(Layout::array::<T>(1).unwrap());
-                (1, ptr)
+            let (new_cap, ptr, new_layout) = if self.cap == 0 {
+                let new_layout = Layout::array::<T>(1).unwrap();
+                let ptr = alloc::alloc(new_layout);
+                (1, ptr, new_layout)
             } else {
                 let new_cap = 2 * self.cap;
                 let old_layout = Layout::array::<T>(self.cap).unwrap();
@@ -39,7 +40,7 @@ impl<T> RawVec<T> {
 
                 assert!(new_byte_size < isize::MAX as usize);
                 let ptr = alloc::realloc(self.ptr.as_ptr().cast(), old_layout, new_byte_size);
-                (new_cap, ptr)
+                (new_cap, ptr, new_layout)
             };
 
             // If allocate or reallocate fail, oom
@@ -66,7 +67,7 @@ impl<T> Drop for RawVec<T> {
     }
 }
 
-struct GapBuffer<T> {
+pub struct GapBuffer<T> {
     buf: RawVec<T>,
     gap_pos: usize,
     gap_size: usize,
@@ -91,6 +92,10 @@ impl<T> GapBuffer<T> {
         self.buf.ptr.as_ptr()
     }
 
+    unsafe fn slot_ptr(&self, offset: usize) -> *mut T {
+        self.buf.ptr.as_ptr().add(offset)
+    }
+
     fn move_gap(&mut self, pos: usize, grow: bool) {
         if self.gap_size == 0 {
             if grow {
@@ -105,18 +110,16 @@ impl<T> GapBuffer<T> {
             }
         }
 
-        let base_ptr = self.base_ptr();
-
         unsafe {
             match pos.cmp(&self.gap_pos) {
                 Ordering::Greater => ptr::copy_nonoverlapping(
-                    base_ptr.add(self.gap_pos + self.gap_size),
-                    base_ptr.add(self.gap_pos),
+                    self.slot_ptr(self.gap_pos + self.gap_size),
+                    self.slot_ptr(self.gap_pos),
                     pos - self.gap_pos,
                 ),
                 Ordering::Less => ptr::copy_nonoverlapping(
-                    base_ptr.add(pos),
-                    base_ptr.add(pos + self.gap_size),
+                    self.slot_ptr(pos),
+                    self.slot_ptr(pos + self.gap_size),
                     self.gap_pos - pos,
                 ),
                 Ordering::Equal => {}
@@ -130,8 +133,7 @@ impl<T> GapBuffer<T> {
         self.move_gap(pos, true);
 
         unsafe {
-            ptr::write(self.base_ptr().add(pos), elem);
-            self.len += 1;
+            ptr::write(self.slot_ptr(pos), elem);
         }
 
         self.gap_pos += 1;
@@ -141,9 +143,8 @@ impl<T> GapBuffer<T> {
     /// Moves the gap to the given position and removes the element
     pub fn remove(&mut self, pos: usize) -> T {
         assert!(pos < self.len());
-        let ptr = self.base_ptr();
         self.move_gap(pos, false);
-        let val = unsafe { ptr::read(self.base_ptr().add(self.gap_pos + self.gap_size)) };
+        let val = unsafe { ptr::read(self.slot_ptr(self.gap_pos + self.gap_size)) };
         self.gap_size += 1;
         val
     }
@@ -152,9 +153,9 @@ impl<T> GapBuffer<T> {
         assert!(pos <= self.len());
         unsafe {
             if pos < self.gap_pos {
-                self.base_ptr().add(pos)
+                self.slot_ptr(pos)
             } else {
-                self.base_ptr().add(self.gap_size + pos)
+                self.slot_ptr(self.gap_size + pos)
             }
         }
     }
@@ -171,8 +172,8 @@ impl<T> GapBuffer<T> {
             Bound::Excluded(&i) => self.get_elem_ptr(i),
             Bound::Unbounded => self.get_elem_ptr(self.len()),
         };
-        let gap_start = unsafe { self.base_ptr().add(self.gap_pos) };
-        let gap_end = unsafe { self.base_ptr().add(self.gap_pos + self.gap_size) };
+        let gap_start = unsafe { self.slot_ptr(self.gap_pos) };
+        let gap_end = unsafe { self.slot_ptr(self.gap_pos + self.gap_size) };
         (start, end, gap_start, gap_end)
     }
 
@@ -201,6 +202,20 @@ impl<T> GapBuffer<T> {
     }
 }
 
+impl<T> Index<usize> for GapBuffer<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        unsafe { &*self.get_elem_ptr(index) }
+    }
+}
+
+impl<T> IndexMut<usize> for GapBuffer<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        unsafe { &mut *self.get_elem_ptr(index) }
+    }
+}
+
 impl<T> Drop for GapBuffer<T> {
     fn drop(&mut self) {
         unsafe {
@@ -214,13 +229,14 @@ impl<T> Drop for GapBuffer<T> {
     }
 }
 
-struct Iter<'a, T> {
+pub struct Iter<'a, T> {
     start: *const T,
     end: *const T,
     gap_start: *const T,
     gap_end: *const T,
     _phantom: PhantomData<&'a GapBuffer<T>>,
 }
+
 
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
@@ -240,7 +256,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
-struct IterMut<'a, T> {
+pub struct IterMut<'a, T> {
     start: *mut T,
     end: *mut T,
     gap_start: *mut T,

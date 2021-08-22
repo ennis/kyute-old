@@ -1,12 +1,17 @@
-//! Drawing code for GUI elements.
+//! Rendering of styled boxes.
+use crate::Rect;
+use kyute_shell::drawing::{
+    Color, ColorInterpolationMode, DrawContext, ExtendMode, GradientStopCollection, Offset, Point,
+};
+use palette::Srgba;
+use std::{collections::HashMap, fmt::Debug};
 
-use kyute_shell::drawing::{DrawContext, Color, GradientStopCollection, ColorInterpolationMode, ExtendMode};
-use kyute_shell::drawing;
-use crate::{EnvKey, Rect, Offset, SideOffsets};
-use std::collections::HashMap;
-use crate::env::Environment;
-use std::sync::Arc;
-use crate::data::Data;
+use kyute_shell::{drawing, platform::Platform};
+use serde::{
+    de::{EnumAccess, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+use std::{fmt, fmt::Formatter};
 
 /// Unit of length: device-independent pixel.
 pub struct Dip;
@@ -16,7 +21,7 @@ pub type DipLength = euclid::Length<f64, Dip>;
 pub type Angle = euclid::Angle<f64>;
 
 /// Length specification.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Length {
     /// Actual screen pixels (the actual physical size depends on the density of the screen).
     Px(f64),
@@ -40,7 +45,13 @@ impl Length {
     }
 }
 
-/*// Provide our own impl for Serialize/Deserialize for anything that has a Color
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ColorRef {
+    Direct(Color),
+    Palette(PaletteIndex),
+}
+
+// Provide our own impl for Serialize/Deserialize for anything that has a Color
 // because of https://github.com/serde-rs/serde/issues/1346
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 enum SerdeColorRef {
@@ -50,8 +61,8 @@ enum SerdeColorRef {
 
 impl serde::Serialize for ColorRef {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         let c = match self {
             ColorRef::Direct(c) => SerdeColorRef::Direct {
@@ -68,8 +79,8 @@ impl serde::Serialize for ColorRef {
 
 impl<'de> serde::Deserialize<'de> for ColorRef {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         let c = SerdeColorRef::deserialize(deserializer)?;
         Ok(match c {
@@ -77,10 +88,17 @@ impl<'de> serde::Deserialize<'de> for ColorRef {
             SerdeColorRef::Palette { index } => ColorRef::Palette(PaletteIndex(index)),
         })
     }
-}*/
+}
 
-/// Describes the shape to draw in the box.
 #[derive(Clone, Debug)]
+pub enum Value<T: Clone + Debug> {
+    /// Constant
+    Constant(T),
+    /// Expression that evaluates to a value of type `T`.
+    Expr(String),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Shape {
     /// Rectangle.
     Rect,
@@ -92,9 +110,7 @@ pub enum Shape {
     MaskBitmap(String),
 }
 
-/// Blend mode.
-// TODO move this in kyute_shell::drawing
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum BlendMode {
     Normal,
     Multiply,
@@ -102,34 +118,28 @@ pub enum BlendMode {
     Overlay,
 }
 
-/// Gradient type
-// TODO move this in kyute_shell::drawing
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum GradientType {
     Linear,
     Radial,
 }
 
-/// Brush description
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Brush {
-    /// Solid color
-    SolidColor(Color),
-    /// Gradient
+    SolidColor(ColorRef),
     Gradient {
         angle: Angle,
         ty: GradientType,
-        stops: Vec<(f64, Color)>,
+        stops: Vec<(f64, ColorRef)>,
         reverse: bool,
     },
-    /// Image pattern
     Pattern {
         url: String,
     },
 }
 
 bitflags::bitflags! {
-    //#[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize)]
     pub struct State: u32 {
         const ACTIVE = 1<<0;
         const DISABLED = 1<<1;
@@ -138,7 +148,7 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct StateFilter {
     pub value: State,
     pub mask: State,
@@ -154,14 +164,14 @@ impl Default for StateFilter {
 }
 
 /// Border reference position
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BorderPosition {
     Inside(Length),
     Center,
     Outside(Length),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Border {
     pub opacity: f64,
     pub blend_mode: BlendMode,
@@ -170,27 +180,27 @@ pub struct Border {
     pub brush: Brush,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Shadow {
     pub opacity: f64,
     pub blend_mode: BlendMode,
-    pub color: Color,
+    pub color: ColorRef,
     pub angle: Angle,
     pub distance: Length,
     pub spread: f64,
     pub size: Length,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Glow {
     pub opacity: f64,
     pub blend_mode: BlendMode,
-    pub color: Color,
+    pub color: ColorRef,
     pub size: Length,
     pub choke: f64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Style {
     pub state_filter: StateFilter,
     pub fill: Option<Brush>,
@@ -215,29 +225,92 @@ impl Default for Style {
     }
 }
 
-#[derive(Clone, Debug)]
-struct StyleSetImpl {
-    content_padding: SideOffsets,
-    shape: Shape,
-    style: Vec<Style>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StyleSet {
+    pub shape: Shape,
+    pub styles: Vec<Style>,
 }
 
 #[derive(Clone, Debug)]
-pub struct StyleSet(Arc<StyleSetImpl>);
+pub struct Palette {
+    pub entries: Vec<Color>,
+}
 
-impl Data for StyleSet {
-    fn same(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0,&other.0)
+impl Palette {
+    pub fn color(&self, index: u32) -> Color {
+        self.entries
+            .get(index as usize)
+            .cloned()
+            .unwrap_or(self.entries[0])
+    }
+
+    pub fn resolve(&self, colorref: ColorRef) -> Color {
+        match colorref {
+            ColorRef::Direct(c) => c,
+            ColorRef::Palette(index) => self.color(index.0),
+        }
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct SerdePalette(Vec<(f32, f32, f32, f32)>);
+
+impl From<Palette> for SerdePalette {
+    fn from(_: Palette) -> Self {
+        unimplemented!()
+    }
+}
+
+// custom impl to work around https://github.com/serde-rs/serde/issues/1346
+impl serde::Serialize for Palette {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let v = SerdePalette(
+            self.entries
+                .iter()
+                .cloned()
+                .map(|c| (c.red, c.green, c.blue, c.alpha))
+                .collect(),
+        );
+        v.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Palette {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v: SerdePalette = Deserialize::deserialize(deserializer)?;
+        Ok(Palette {
+            entries: v
+                .0
+                .into_iter()
+                .map(|(r, g, b, a)| Color::new(r, g, b, a))
+                .collect(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StyleCollection {
+    pub style_sets: HashMap<String, StyleSet>,
+    pub palettes: Vec<Palette>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct PaletteIndex(pub u32);
+
 fn make_gradient_stop_collection(
     ctx: &DrawContext,
-    colors: &[(f64, Color)],
+    colors: &[(f64, ColorRef)],
+    palette: &Palette,
 ) -> GradientStopCollection {
     let colors: Vec<_> = colors
         .iter()
-        .map(|(x, c)| (*x, *c))
+        .map(|(x, c)| (*x, palette.resolve(*c)))
         .collect();
     GradientStopCollection::new(
         ctx,
@@ -251,11 +324,11 @@ fn make_brush(
     ctx: &DrawContext,
     bounds: &Rect,
     brush: &Brush,
-) -> kyute_shell::drawing::Brush
-{
+    palette: &Palette,
+) -> kyute_shell::drawing::Brush {
     match brush {
-        Brush::SolidColor(color) => {
-            drawing::Brush::solid_color(ctx, *color)
+        Brush::SolidColor(colorref) => {
+            drawing::Brush::new_solid_color(ctx, palette.resolve(*colorref))
         }
         Brush::Gradient {
             angle,
@@ -277,8 +350,8 @@ fn make_brush(
             let a = c + Offset::new(-x, y);
             let b = c + Offset::new(x, -y);
 
-            let gradient_stops = make_gradient_stop_collection(ctx, stops);
-            drawing::Brush::linear_gradient(ctx, &gradient_stops, a, b, 1.0)
+            let gradient_stops = make_gradient_stop_collection(ctx, stops, palette);
+            drawing::Brush::new_linear_gradient(ctx, &gradient_stops, a, b, 1.0)
         }
         Brush::Gradient {
             angle,
@@ -287,64 +360,23 @@ fn make_brush(
             reverse,
         } => {
             eprintln!("radial gradients not implemented");
-            drawing::Brush::solid_color(ctx, Color::default())
+            drawing::Brush::new_solid_color(ctx, palette.color(0))
         }
         _ => {
             eprintln!("brush type not supported");
-            drawing::Brush::solid_color(ctx, Color::default())
+            drawing::Brush::new_solid_color(ctx, palette.color(0))
         }
-    }
-}
-
-pub struct StyleSetBuilder(StyleSetImpl);
-
-impl StyleSetBuilder {
-    pub fn with_content_padding(mut self, content_padding: SideOffsets) -> Self {
-        self.0.content_padding = content_padding;
-        self
-    }
-
-    pub fn with_shape(mut self, shape: Shape) -> Self {
-        self.0.shape = shape;
-        self
-    }
-
-    pub fn with_style(mut self, style: Style) -> Self {
-        self.0.style.push(style);
-        self
-    }
-
-    pub fn build(self) -> StyleSet {
-        StyleSet(Arc::new(self.0))
     }
 }
 
 impl StyleSet {
-    pub fn builder() -> StyleSetBuilder {
-        StyleSetBuilder(StyleSetImpl {
-            content_padding: Default::default(),
-            shape: Shape::Rect,
-            style: vec![]
-        })
-    }
-
-    pub fn new() -> StyleSet {
-        StyleSet(Arc::new(StyleSetImpl {
-            content_padding: Default::default(),
-            shape: Shape::Rect,
-            style: vec![]
-        }))
-    }
-
-    pub fn content_padding(&self) -> SideOffsets {
-        self.0.content_padding
-    }
-
-    pub fn draw_box(
+    fn draw(
         &self,
+        platform: &Platform,
         ctx: &mut DrawContext,
         bounds: &Rect,
         state: State,
+        palette: &Palette,
     ) {
         let mut fill = None;
         let mut borders: Vec<Border> = Vec::new();
@@ -353,7 +385,7 @@ impl StyleSet {
         let mut inner_glow = None;
         let mut outer_glow = None;
 
-        for s in self.0.style.iter() {
+        for s in self.styles.iter() {
             if s.state_filter.value & s.state_filter.mask == state & s.state_filter.mask {
                 fill = s.fill.clone();
                 borders.extend(s.borders.iter().cloned());
@@ -381,19 +413,20 @@ impl StyleSet {
             || outer_glow.is_some()
             || inner_glow.is_some()
         {
-            tracing::warn!("shadow/glow effects not implemented");
+            // TODO
+            eprintln!("WARNING: blurring effects not implemented");
         }
 
-        let path_geometry = if let Shape::Path(ref s) = self.0.shape {
-            Some(drawing::PathGeometry::try_from_svg_path(s).expect("invalid SVG path"))
+        let path_geometry = if let Shape::Path(ref s) = self.shape {
+            Some(drawing::PathGeometry::try_from_svg_path(platform, s).expect("invalid SVG path"))
         } else {
             None
         };
 
         // fill
         if let Some(fill) = fill {
-            let brush = make_brush(ctx, &bounds, &fill);
-            match self.0.shape {
+            let brush = make_brush(ctx, &bounds, &fill, palette);
+            match self.shape {
                 Shape::Rect => {
                     ctx.fill_rectangle(bounds, &brush);
                 }
@@ -424,12 +457,12 @@ impl StyleSet {
                 }
                 BorderPosition::Center => bounds,
             };
-            let brush = make_brush(ctx, &rect, &b.brush);
+            let brush = make_brush(ctx, &rect, &b.brush, palette);
             if b.blend_mode != BlendMode::Normal {
                 eprintln!("unimplemented blend mode {:?}", b.blend_mode);
             }
 
-            match self.0.shape {
+            match self.shape {
                 Shape::Rect => {
                     ctx.draw_rectangle(rect, &brush, width);
                 }
@@ -441,12 +474,46 @@ impl StyleSet {
                     ctx.draw_geometry(path_geometry.as_ref().unwrap(), &brush, width);
                 }
                 _ => {
-                    eprintln!("unimplemented shape {:?}", self.0.shape);
+                    eprintln!("unimplemented shape {:?}", self.shape);
                 }
             }
         }
 
         ctx.restore();
         // the rest is unimplemented
+    }
+}
+
+impl StyleCollection {
+    pub fn draw(
+        &self,
+        platform: &Platform,
+        ctx: &mut DrawContext,
+        bounds: Rect,
+        style_set: &str,
+        state_bits: State,
+        palette: PaletteIndex,
+    ) {
+        // resolve the style set
+        let style_set = if let Some(style_set) = self.style_sets.get(style_set) {
+            style_set
+        } else {
+            eprintln!("Style set not found in collection: {}", style_set);
+            return;
+        };
+
+        // resolve the palette
+        let palette = if palette.0 as usize >= self.palettes.len() {
+            eprintln!(
+                "Invalid palette index (selected #{}, maximum is #{})",
+                palette.0,
+                self.palettes.len() - 1
+            );
+            &self.palettes[0]
+        } else {
+            &self.palettes[palette.0 as usize]
+        };
+
+        style_set.draw(platform, ctx, &bounds, state_bits, palette);
     }
 }

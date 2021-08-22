@@ -1,14 +1,9 @@
 mod paint;
 
-use crate::{layout::Measurements, widget::Widget, Offset, Point};
+use crate::{key::Key, layout::Measurements, widget::Widget, Offset, Point};
 pub use paint::PaintCtx;
-use std::cell::Cell;
-use std::panic::Location;
-use crate::key::Key;
+use std::{cell::Cell, panic::Location};
 
-slotmap::new_key_type! {
-    pub struct NodeId;
-}
 
 pub struct NodeRef<'a> {
     pub tree: &'a NodeTree,
@@ -39,7 +34,6 @@ impl Links {
         }
     }
 }
-
 
 /// A node within the visual tree.
 ///
@@ -255,8 +249,7 @@ impl NodeTree {
                 }
 
                 NodeCursor::After(before_id) => {
-                    let [this, before] =
-                        self.nodes.get_disjoint_unchecked_mut([id, before_id]);
+                    let [this, before] = self.nodes.get_disjoint_unchecked_mut([id, before_id]);
                     let next_id = before.links.next_sibling;
                     let parent_id = before.links.parent;
 
@@ -275,8 +268,7 @@ impl NodeTree {
                 }
 
                 NodeCursor::BeforeChild(parent_id) => {
-                    let [this, parent] =
-                        self.nodes.get_disjoint_unchecked_mut([id, parent_id]);
+                    let [this, parent] = self.nodes.get_disjoint_unchecked_mut([id, parent_id]);
                     let last_child = parent.links.last_child;
 
                     this.links.parent = Some(parent_id);
@@ -350,7 +342,8 @@ mod tests {
         }
 
         // insert child: R(A)
-        let a = node_tree.insert(Box::new(Dummy), NodeCursor::BeforeChild(root));
+        let a = node_tree.create(Box::new(Dummy));
+        node_tree.insert(a, NodeCursor::BeforeChild(root));
         {
             let a_node = node_tree.get(a).unwrap();
             let root_node = node_tree.get(root).unwrap();
@@ -362,7 +355,8 @@ mod tests {
         }
 
         // insert child: R(A,B)
-        let b = node_tree.insert(Box::new(Dummy), NodeCursor::BeforeChild(root));
+        let b = node_tree.create(Box::new(Dummy));
+        node_tree.insert(b, NodeCursor::BeforeChild(root));
         {
             let a_node = node_tree.get(a).unwrap();
             let b_node = node_tree.get(b).unwrap();
@@ -378,7 +372,8 @@ mod tests {
         }
 
         // insert before (begin): R(C,A,B)
-        let c = node_tree.insert(Box::new(Dummy), NodeCursor::Before(a));
+        let c = node_tree.create(Box::new(Dummy));
+        node_tree.insert(c, NodeCursor::Before(a));
         {
             let a_node = node_tree.get(a).unwrap();
             let c_node = node_tree.get(c).unwrap();
@@ -394,7 +389,8 @@ mod tests {
         }
 
         // insert before (end): R(C,A,D,B)
-        let d = node_tree.insert(Box::new(Dummy), NodeCursor::Before(b));
+        let d = node_tree.create(Box::new(Dummy));
+        node_tree.insert(d, NodeCursor::Before(b));
         {
             let a_node = node_tree.get(a).unwrap();
             let d_node = node_tree.get(d).unwrap();
@@ -407,7 +403,8 @@ mod tests {
         }
 
         // insert before (middle): R(C,A,E,D,B)
-        let e = node_tree.insert(Box::new(Dummy), NodeCursor::Before(d));
+        let e = node_tree.create(Box::new(Dummy));
+        node_tree.insert(e, NodeCursor::Before(d));
         {
             let a_node = node_tree.get(a).unwrap();
             let e_node = node_tree.get(e).unwrap();
@@ -420,7 +417,8 @@ mod tests {
         }
 
         // insert after (middle): R(C,A,E,F,D,B)
-        let f = node_tree.insert(Box::new(Dummy), NodeCursor::After(e));
+        let f = node_tree.create(Box::new(Dummy));
+        node_tree.insert(f, NodeCursor::After(e));
         {
             let e_node = node_tree.get(e).unwrap();
             let f_node = node_tree.get(f).unwrap();
@@ -433,7 +431,8 @@ mod tests {
         }
 
         // insert after (end): R(C,A,E,F,D,B,G)
-        let g = node_tree.insert(Box::new(Dummy), NodeCursor::After(b));
+        let g = node_tree.create(Box::new(Dummy));
+        node_tree.insert(g, NodeCursor::After(b));
         {
             let b_node = node_tree.get(b).unwrap();
             let g_node = node_tree.get(g).unwrap();
@@ -451,10 +450,14 @@ mod tests {
         let mut node_tree = NodeTree::new();
         let root = node_tree.root();
         // R(A,B,C,D)
-        let a = node_tree.insert(Box::new(Dummy), NodeCursor::BeforeChild(root));
-        let b = node_tree.insert(Box::new(Dummy), NodeCursor::After(a));
-        let c = node_tree.insert(Box::new(Dummy), NodeCursor::After(b));
-        let d = node_tree.insert(Box::new(Dummy), NodeCursor::After(c));
+        let a = node_tree.create(Box::new(Dummy));
+        node_tree.insert(a, NodeCursor::BeforeChild(root));
+        let b = node_tree.create(Box::new(Dummy));
+        node_tree.insert(b, NodeCursor::After(a));
+        let c = node_tree.create(Box::new(Dummy));
+        node_tree.insert(c, NodeCursor::After(b));
+        let d = node_tree.create(Box::new(Dummy));
+        node_tree.insert(d, NodeCursor::After(c));
 
         // R(B,C,D)
         node_tree.detach(a);
@@ -502,13 +505,20 @@ mod tests {
         let mut node_tree = NodeTree::new();
         let root = node_tree.root();
         // R(A,B,C,D)
-        let a = node_tree.insert(Box::new(Dummy), NodeCursor::BeforeChild(root));
-        let b = node_tree.insert(Box::new(Dummy), NodeCursor::After(a));
-        let c = node_tree.insert(Box::new(Dummy), NodeCursor::After(b));
-        let d = node_tree.insert(Box::new(Dummy), NodeCursor::After(c));
+        let a = node_tree.create(Box::new(Dummy));
+        node_tree.insert(a, NodeCursor::BeforeChild(root));
+        let b = node_tree.create(Box::new(Dummy));
+        node_tree.insert(b, NodeCursor::After(a));
+        let c = node_tree.create(Box::new(Dummy));
+        node_tree.insert(c, NodeCursor::After(b));
+        let d = node_tree.create(Box::new(Dummy));
+        node_tree.insert(d, NodeCursor::After(c));
 
         let root_node = node_tree.get(root).unwrap();
-        let children: Vec<_> = node_tree.children(root).map(|x| x as *const Node).collect();
+        let children: Vec<_> = node_tree
+            .children(root)
+            .map(|x| node_tree.get(x).unwrap() as *const Node)
+            .collect();
         assert_eq!(
             &children[..],
             &[

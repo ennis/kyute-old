@@ -12,7 +12,7 @@ use crate::{
         SystemServices::HINSTANCE,
         WindowsAndMessaging::HWND,
     },
-    drawing::DrawContext,
+    drawing::{DrawContext, PhysicalSize},
     error::Error,
     platform::Platform,
 };
@@ -49,7 +49,7 @@ impl<'a> WindowDrawContext<'a> {
 
         let swap_chain = &window.swap_chain;
         let backbuffer = unsafe { swap_chain.GetBuffer::<IDXGISurface>(0).unwrap() };
-        let dpi = dbg!(96.0 * window.window.scale_factor() as f32);
+        let dpi = 96.0 * window.window.scale_factor() as f32;
 
         // create target bitmap
         let mut bitmap = unsafe {
@@ -148,34 +148,34 @@ impl PlatformWindow {
     /// Resizes the swap chain and associated resources of the window.
     ///
     /// Must be called whenever winit sends a resize message.
-    pub fn resize(&mut self, (width, height): (u32, u32)) {
+    pub fn resize(&mut self, size: PhysicalSize) {
         //trace!("resizing swap chain: {}x{}", width, height);
 
         // resizing to 0x0 will fail, so don't bother
-        if width == 0 || height == 0 {
+        if size.is_empty() {
             return;
         }
+
+        let size_i = size.to_u32();
 
         unsafe {
             // resize the swap chain
             if let Err(err) = self
                 .swap_chain
-                .ResizeBuffers(0, width, height, DXGI_FORMAT::DXGI_FORMAT_UNKNOWN, 0)
+                .ResizeBuffers(
+                    0,
+                    size_i.width,
+                    size_i.height,
+                    DXGI_FORMAT::DXGI_FORMAT_UNKNOWN,
+                    0,
+                )
                 .ok()
             {
                 // it fails sometimes, just log it
                 tracing::error!("IDXGISwapChain1::ResizeBuffers failed: {}", err);
             }
         }
-
-        //self.swap_chain_width = width;
-        //self.swap_chain_height = height;
     }
-
-    /*/// Returns the current swap chain size in physical pixels.
-    pub fn swap_chain_size(&self) -> (u32, u32) {
-        (self.swap_chain_width, self.swap_chain_height)
-    }*/
 
     /// Creates a new window from the options given in the provided [`WindowBuilder`].
     ///

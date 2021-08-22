@@ -134,12 +134,15 @@ impl Platform {
             };
 
             use std::os::windows::ffi::OsStringExt;
-            let name = OsString::from_wide(&desc.Description[..]);
+
+            let name = &desc.Description[..];
+            let name_len = name.iter().take_while(|&&c| c != 0).count();
+            let name = OsString::from_wide(&desc.Description[..name_len])
+                .to_string_lossy()
+                .into_owned();
             eprintln!(
                 "DXGI adapter info: name={}, LUID={:08x}{:08x}",
-                name.to_str().unwrap(),
-                desc.AdapterLuid.HighPart,
-                desc.AdapterLuid.LowPart,
+                name, desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart,
             );
         }
 

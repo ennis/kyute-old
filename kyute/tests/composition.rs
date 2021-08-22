@@ -1,8 +1,2 @@
-
-
 #[test]
-fn test_composition() {
-
-
-
-}
+fn test_composition() {}

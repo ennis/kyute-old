@@ -1,7 +1,10 @@
-use crate::{layout::{BoxConstraints, Measurements}, Size, Rect, Offset};
+use crate::{
+    core::{EventCtx, LayoutCtx, Node, PaintCtx, Widget},
+    event::Event,
+    layout::{BoxConstraints, Measurements},
+    CompositionCtx, Offset, Rect, Size,
+};
 use tracing::trace;
-use crate::widget::{Widget, LayoutCtx, Node};
-use crate::node::{NodeRef, PaintCtx};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Axis {
@@ -61,9 +64,27 @@ pub struct Flex {
     axis: Axis,
 }
 
+impl Flex {
+    pub fn new(axis: Axis) -> Flex {
+        Flex { axis }
+    }
+}
+
 impl Widget for Flex {
-    fn layout(&mut self, ctx: &mut LayoutCtx, children: &mut [Node], constraints: &BoxConstraints) -> Measurements {
-        let child_measurements: Vec<Measurements> = children.iter_mut().map(|n| n.layout(ctx, constraints)).collect();
+    fn debug_name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
+
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        children: &mut [Node],
+        constraints: &BoxConstraints,
+    ) -> Measurements {
+        let child_measurements: Vec<Measurements> = children
+            .iter_mut()
+            .map(|n| n.layout(ctx, constraints))
+            .collect();
 
         let max_cross_axis_len = child_measurements
             .iter()
@@ -84,7 +105,7 @@ impl Widget for Flex {
         for i in 0..child_measurements.len() {
             let child = &mut children[i];
             let measurement = &child_measurements[i];
-            let len = self.axis.main_len(m.size);
+            let len = self.axis.main_len(measurement.size);
             // offset children
             let offset = match self.axis {
                 Axis::Vertical => Offset::new(0.0, d),
@@ -93,10 +114,10 @@ impl Widget for Flex {
             child.set_offset(offset);
             d += len + spacing;
             d = d.ceil();
-            trace!("flex pos={}", d);
+            //trace!("flex pos={}", d);
         }
 
-        let size = match axis {
+        let size = match self.axis {
             Axis::Vertical => Size::new(cross_axis_len, constraints.constrain_height(d)),
             Axis::Horizontal => Size::new(constraints.constrain_width(d), cross_axis_len),
         };
@@ -106,15 +127,21 @@ impl Widget for Flex {
 
     fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
         for c in children.iter_mut() {
-            c.paint(ctx, bounds);
+            c.paint(ctx);
         }
     }
 }
 
-impl Flex {
-    pub fn new(main_axis: Axis) -> Self {
-        Flex {
-            axis: main_axis,
-        }
-    }
+pub fn vbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
+    flex(cx, Axis::Vertical, contents)
+}
+
+pub fn hbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
+    flex(cx, Axis::Horizontal, contents)
+}
+
+pub fn flex(cx: &mut CompositionCtx, axis: Axis, contents: impl FnMut(&mut CompositionCtx)) {
+    cx.enter(0);
+    cx.emit_node(|cx| Flex::new(axis), |cx, _| {}, contents);
+    cx.exit();
 }

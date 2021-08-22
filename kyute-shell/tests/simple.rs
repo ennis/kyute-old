@@ -39,7 +39,7 @@ fn test_simple() {
                 let text_format = TextFormat::builder().size(12.0).build().unwrap();
                 let text =
                     TextLayout::new("Hello world", &text_format, Size::new(200.0, 100.0)).unwrap();
-                let text_color = Brush::new_solid_color(&dc, Color::new(1.0, 1.0, 1.0, 1.0));
+                let text_color = Brush::solid_color(&dc, Color::new(1.0, 1.0, 1.0, 1.0));
                 dc.clear(Color::new(0.0, 0.1, 0.2, 1.0));
                 dc.draw_text_layout(
                     Point::new(10.0, 10.0),

@@ -1,7 +1,4 @@
-use kyute::node::{NodeTree, Dummy, NodeCursor};
+use kyute::node::{Dummy, NodeCursor, NodeTree};
 
 #[test]
-fn test_node_tree() {
-
-
-}
+fn test_node_tree() {}

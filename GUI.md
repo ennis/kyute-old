@@ -353,3 +353,32 @@ fn gui(cx) {
     
 - Programmatic window resize?
     - request relayout
+
+
+# Environment a.k.a "ambient values"
+- during recomp, override a specific value in the environment, identified by a key
+- store the previous value; if it is different, force a recomp
+
+# Handling events:
+- events should be handled during comp, 
+
+# Modifiers: 
+- used for layout (add padding, align in parent)
+- used for painting backgrounds
+- used to add event handlers
+
+Issue: modifiers can be passed as a parameter to a composable function, so they need to implement `Data`.
+Maybe just do pointer equality, as with Environment?
+
+# Pending issues:
+- simple widgets for background painting, layout adjustments
+- handling events during recomp
+  - ideally we would want to handle event during recomp, where we have access to state
+  - however, in the current strategy, recomp is skipped if the parameters are the same
+    - how does jetpack compose works?
+      - JC supports true partial recomposition: each composition "block" (a call of a composable function)
+        can be called again independently.
+        - Since arguments to a composable function are stored in the comp table, can just call the function again.  
+      - "Naked" mutable state is not supported (mutation happens in callbacks, not during recomp; recomp is triggered because of a state change)
+        
+
