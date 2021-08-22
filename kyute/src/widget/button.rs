@@ -9,9 +9,24 @@ use crate::{
     Alignment, Rect, SideOffsets, Size,
 };
 use kyute_shell::drawing::{Brush, Color};
+use std::convert::TryFrom;
+use crate::composition::ActionResult;
 
-pub enum ButtonAction {
+#[derive(Copy,Clone)]
+enum ButtonAction {
     Clicked,
+}
+
+#[derive(Copy,Clone)]
+pub struct ButtonResult(Option<ButtonAction>);
+
+impl ButtonResult {
+    pub fn on_click(&self, f: impl FnOnce()) {
+        match self.0 {
+            None => {}
+            Some(ButtonAction::Clicked) => f(),
+        }
+    }
 }
 
 struct Button;
@@ -53,6 +68,7 @@ impl Widget for Button {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        _env: &Environment
     ) -> Measurements {
         // measure the label inside
         let padding = SideOffsets::new_all_same(4.0);
@@ -92,6 +108,7 @@ impl Widget for Button {
         ctx: &mut PaintCtx,
         children: &mut [Node],
         bounds: Rect,
+        _env: &Environment
     ) {
         let brush = Brush::solid_color(ctx, Color::new(0.100, 0.100, 0.100, 1.0));
         let fill = Brush::solid_color(ctx, Color::new(0.800, 0.888, 0.100, 1.0));
@@ -107,10 +124,10 @@ impl Widget for Button {
     }
 }
 
-pub fn button(cx: &mut CompositionCtx, label: &str) -> Option<ButtonAction> {
+pub fn button(cx: &mut CompositionCtx, label: &str) -> ButtonResult {
     cx.enter(0);
     let action =
         cx.emit_node(|_| Button, |cx, button| {}, |cx| text(cx, label));
     cx.exit();
-    action.cast()
+    ButtonResult(action.cast())
 }

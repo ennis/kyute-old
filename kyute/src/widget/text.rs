@@ -44,6 +44,7 @@ impl Widget for Text {
         _ctx: &mut LayoutCtx,
         _children: &mut [Node],
         constraints: &BoxConstraints,
+        _env: &Environment
     ) -> Measurements {
         let font_name = "Consolas";
         let font_size = 12;
@@ -68,7 +69,7 @@ impl Widget for Text {
         Measurements { size, baseline }
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect, _env: &Environment) {
         let text_brush = Brush::solid_color(ctx, Color::new(0.92, 0.92, 0.92, 1.0));
 
         if let Some(ref text_layout) = self.text_layout {

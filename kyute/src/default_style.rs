@@ -160,7 +160,7 @@ pub fn get_default_application_style() -> Environment {
         })
         .build();
 
-    let text_box_style_set = StyleSet::builder()
+    let text_edit_style_set = StyleSet::builder()
         .with_shape(Shape::Rect)
         .with_style(Style {
             fill: Some(Brush::SolidColor(FRAME_BG_SUNKEN_COLOR)),
@@ -201,14 +201,14 @@ pub fn get_default_application_style() -> Environment {
         .build();
 
     Environment::new()
-        .add(&theme::BUTTON_STYLE, button_style_set)
-        .add(&theme::SLIDER_KNOB_STYLE, slider_knob_style_set)
-        .add(&theme::SLIDER_TRACK_STYLE, slider_track_style_set)
-        .add(&theme::TEXT_BOX_BACKGROUND_STYLE, text_box_style_set)
-        .add(&theme::SLIDER_TRACK_Y, 9.0)
-        .add(&theme::SLIDER_TRACK_HEIGHT, 4.0)
-        .add(&theme::SLIDER_KNOB_WIDTH, 11.0)
-        .add(&theme::SLIDER_KNOB_HEIGHT, 11.0)
-        .add(&theme::SLIDER_KNOB_Y, 7.0)
-        .add(&theme::SLIDER_HEIGHT, 14.0)
+        .add(theme::BUTTON_STYLE, button_style_set)
+        .add(theme::SLIDER_KNOB_STYLE, slider_knob_style_set)
+        .add(theme::SLIDER_TRACK_STYLE, slider_track_style_set)
+        .add(theme::TEXT_EDIT_BACKGROUND_STYLE, text_edit_style_set)
+        .add(theme::SLIDER_TRACK_Y, 9.0)
+        .add(theme::SLIDER_TRACK_HEIGHT, 4.0)
+        .add(theme::SLIDER_KNOB_WIDTH, 11.0)
+        .add(theme::SLIDER_KNOB_HEIGHT, 11.0)
+        .add(theme::SLIDER_KNOB_Y, 7.0)
+        .add(theme::SLIDER_HEIGHT, 14.0)
 }

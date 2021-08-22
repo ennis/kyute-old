@@ -90,7 +90,7 @@ struct EnvImpl {
 }
 
 impl EnvImpl {
-    fn get<T>(&self, key: &EnvKey<T>) -> Option<T> where T: EnvValue {
+    fn get<T>(&self, key: EnvKey<T>) -> Option<T> where T: EnvValue {
         self.values
             .get(key.key)
             .map(|v| {
@@ -112,7 +112,7 @@ impl Environment {
     }
 
     /// Creates a new environment that adds or overrides a given key.
-    pub fn add<T>(mut self, key: &EnvKey<T>, value: T) ->  Environment where T: EnvValue {
+    pub fn add<T>(mut self, key: EnvKey<T>, value: T) ->  Environment where T: EnvValue {
         match Arc::get_mut(&mut self.0) {
             Some(env) => {
                 env.values.insert(key.key, Arc::new(value));
@@ -130,7 +130,7 @@ impl Environment {
     }
 
     /// Returns the value corresponding to the key.
-    pub fn get<T>(&self, key: &EnvKey<T>) -> Option<T> where T: EnvValue {
+    pub fn get<T>(&self, key: EnvKey<T>) -> Option<T> where T: EnvValue {
         self.0.get(key)
     }
 

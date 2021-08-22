@@ -3,12 +3,12 @@
 use crate::{
     application::AppCtx,
     bloom::Bloom,
-    composition::CompositionSlot,
+    composition::{ActionResult, CompositionSlot},
     event::{Event, InputState, MoveFocusDirection, PointerButton, PointerEvent, PointerEventKind},
     layout::{BoxConstraints, Measurements},
     region::Region,
     util::Counter,
-    Offset, PhysicalSize, Point, Rect, Size,
+    Environment, Offset, PhysicalSize, Point, Rect, Size,
 };
 use keyboard_types::{KeyState, KeyboardEvent};
 use kyute_shell::{
@@ -31,7 +31,6 @@ use std::{
     time::Instant,
 };
 use tracing::{trace, trace_span, warn};
-use crate::composition::ActionResult;
 
 /// ID of a node in the tree.
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
@@ -789,7 +788,13 @@ impl WindowState {
         )
     }
 
-    fn paint(&mut self, node_id: NodeId, widget: &mut dyn Widget, children: &mut [Node]) {
+    fn paint(
+        &mut self,
+        node_id: NodeId,
+        widget: &mut dyn Widget,
+        children: &mut [Node],
+        env: &Environment,
+    ) {
         {
             let logical_window_size = self.logical_size();
             let bounds = Rect::new(Point::origin(), logical_window_size);
@@ -811,7 +816,7 @@ impl WindowState {
                 invalid: &self.invalid,
             };
 
-            widget.paint(&mut ctx, children, bounds);
+            widget.paint(&mut ctx, children, bounds, env);
         }
         self.window.present();
     }
@@ -835,13 +840,9 @@ pub struct EventCtx<'a> {
     bounds: Rect,
     /// The bounds of the current widget in its parent window coordinate space.
     window_bounds: Rect,
-    /// Focus change requested
-    pub(crate) focus_action: FocusAction,
-    /// Pointer grab requested
-    pub(crate) pointer_capture: bool,
     /// Event handled
     handled: bool,
-    pending_actions: &'a mut Vec<Box<dyn Any>>
+    pending_actions: &'a mut Vec<Box<dyn Any>>,
 }
 
 impl<'a> EventCtx<'a> {
@@ -857,10 +858,8 @@ impl<'a> EventCtx<'a> {
             node_id,
             bounds: Default::default(),
             window_bounds: Default::default(),
-            focus_action: FocusAction::Keep,
-            pointer_capture: false,
             handled: false,
-            pending_actions
+            pending_actions,
         }
     }
 
@@ -929,9 +928,18 @@ impl<'a> EventCtx<'a> {
 
     /// Acquires the focus.
     pub fn request_focus(&mut self) {
-        //assert!(!self.in_focus_event, "cannot request focus in a focus handler");
-        self.set_handled();
-        self.focus_action = FocusAction::Acquire;
+        if let Some(ref mut window_state) = self.window_state {
+            if window_state.focus != Some(self.node_id) {
+                // changing focus
+                if let Some(old_focus) = window_state.focus {
+                    self.app_ctx.post_event(None, EventTarget::Direct(old_focus), Event::FocusLost);
+                }
+                window_state.focus = Some(self.node_id);
+                self.app_ctx.post_event(None, EventTarget::Direct(self.node_id), Event::FocusGained);
+            }
+        } else {
+            warn!(node_id=?self.node_id, "request_focus: node does not belong to a window and doesn't receive pointer events");
+        }
     }
 
     /// Returns whether the current node has the focus.
@@ -982,10 +990,11 @@ pub trait Widget: Any {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        env: &Environment,
     ) -> Measurements;
 
     /// Called to paint the widget
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect);
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect, env: &Environment);
 
     /// Called only for native window widgets.
     fn window_paint(&mut self, _ctx: &mut WindowPaintCtx, _children: &mut [Node]) {}
@@ -1021,12 +1030,19 @@ impl<W: Widget + ?Sized> Widget for Box<W> {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        env: &Environment,
     ) -> Measurements {
-        Widget::layout(&mut **self, ctx, children, constraints)
+        Widget::layout(&mut **self, ctx, children, constraints, env)
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
-        Widget::paint(&mut **self, ctx, children, bounds)
+    fn paint(
+        &mut self,
+        ctx: &mut PaintCtx,
+        children: &mut [Node],
+        bounds: Rect,
+        env: &Environment,
+    ) {
+        Widget::paint(&mut **self, ctx, children, bounds, env)
     }
 
     fn window_paint(&mut self, ctx: &mut WindowPaintCtx, children: &mut [Node]) {
@@ -1056,11 +1072,20 @@ pub struct Node<W = Box<dyn Widget>> {
     pub(crate) composition_table: Vec<CompositionSlot>,
     pub(crate) child_filter: Bloom<NodeId>,
     pub(crate) pending_actions: Vec<Box<dyn Any>>,
+    env: Environment,
 }
 
 impl Node {
     pub fn dummy() -> Node {
-        unsafe { Node::new(Box::new(Dummy), NodeId::next(), None, None) }
+        unsafe {
+            Node::new(
+                Box::new(Dummy),
+                NodeId::next(),
+                None,
+                None,
+                Environment::new(),
+            )
+        }
     }
 }
 
@@ -1080,6 +1105,7 @@ impl<W: Widget> Node<W> {
         id: NodeId,
         parent_window_id: Option<WindowId>,
         window: Option<PlatformWindow>,
+        env: Environment,
     ) -> Node<W> {
         let window_state = window.map(|w| Box::new(WindowState::new(w)));
         Node {
@@ -1094,7 +1120,8 @@ impl<W: Widget> Node<W> {
             window_state,
             composition_table: vec![],
             child_filter: Default::default(),
-            pending_actions: vec![]
+            pending_actions: vec![],
+            env,
         }
     }
 
@@ -1187,7 +1214,7 @@ impl<W: Widget> Node<W> {
         let mut handled = false;
 
         // --- bubbling phase ---
-        if mode == EventPropagationMode::Bubble {
+        if mode == EventPropagationMode::Bubble || mode == EventPropagationMode::Single {
             // bubbling: deliver to children first, and if the event is handled, immediately return
             if let Some((&first, rest)) = path.split_first() {
                 handled = self.children[first].propagate_event_recursive(
@@ -1208,14 +1235,12 @@ impl<W: Widget> Node<W> {
                 node_id: self.id,
                 bounds,
                 window_bounds,
-                focus_action: FocusAction::Keep,
-                pointer_capture: false,
                 handled,
-                pending_actions: &mut self.pending_actions
+                pending_actions: &mut self.pending_actions,
             };
             self.widget
                 .event(&mut event_ctx, &mut self.children, &transformed_event);
-            handled = event_ctx.handled;
+            handled = event_ctx.handled || (mode == EventPropagationMode::Single);
         }
 
         // --- tunneling phase ---
@@ -1250,9 +1275,8 @@ impl<W: Widget> Node<W> {
         event: &Event,
         target: EventTarget,
     ) {
-        //trace!(?self.id, ?target, ?event, "delivering event");
-
         // determine the delivery path (as a sequence of child node indices)
+        // TODO factor out common code
         let (mode, path) = match target {
             EventTarget::Tunnel(target) => {
                 let mut path = vec![];
@@ -1262,17 +1286,21 @@ impl<W: Widget> Node<W> {
                 }
                 (EventPropagationMode::Tunnel, path)
             }
-            EventTarget::Bubble(source) => {
+            EventTarget::Bubble(target) => {
                 let mut path = vec![];
-                if !self.path_to_child(source, &mut path) {
+                if !self.path_to_child(target, &mut path) {
                     warn!(?target, "no path to target");
                     return;
                 }
                 (EventPropagationMode::Bubble, path)
             }
-            EventTarget::Direct(_) => {
-                // TODO
-                return;
+            EventTarget::Direct(target) => {
+                let mut path = vec![];
+                if !self.path_to_child(target, &mut path) {
+                    warn!(?target, "no path to target");
+                    return;
+                }
+                (EventPropagationMode::Single, path)
             }
             EventTarget::Broadcast => {
                 // TODO
@@ -1326,6 +1354,7 @@ impl<W: Widget> Node<W> {
             self.id,
             &mut self.widget,
             &mut self.children[..],
+            &self.env,
         );
     }
 
@@ -1340,9 +1369,9 @@ impl<W: Widget> Node<W> {
             app_ctx,
             window_state: self.window_state.as_deref(),
         };
-        self.measurements = self
-            .widget
-            .layout(&mut ctx, &mut self.children, constraints);
+        self.measurements =
+            self.widget
+                .layout(&mut ctx, &mut self.children, constraints, &self.env);
         // trace!(measurements = ?self.measurements, "computed widget measurements");
         self.measurements
     }
@@ -1419,6 +1448,7 @@ impl<W: Widget> Node<W> {
                 &mut child_ctx,
                 &mut self.children,
                 Rect::new(Point::origin(), size),
+                &self.env,
             );
         }
 
@@ -1447,6 +1477,7 @@ impl Widget for Dummy {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        _env: &Environment,
     ) -> Measurements {
         for c in children.iter_mut() {
             c.layout(ctx, constraints);
@@ -1454,5 +1485,12 @@ impl Widget for Dummy {
         Measurements::default()
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, _children: &mut [Node], _bounds: Rect) {}
+    fn paint(
+        &mut self,
+        ctx: &mut PaintCtx,
+        _children: &mut [Node],
+        _bounds: Rect,
+        _env: &Environment,
+    ) {
+    }
 }

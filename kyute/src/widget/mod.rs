@@ -1,21 +1,20 @@
 //! built-in widgets.
 mod button;
+mod container;
 mod flex;
 mod grid;
-mod text;
-mod window;
 mod slider;
-mod container;
-//mod textedit;
+mod text;
+mod textedit;
+mod window;
 
-pub use button::{button, ButtonAction};
-pub use flex::{Axis, CrossAxisAlignment, Flex, MainAxisAlignment, MainAxisSize, vbox, hbox, flex};
+pub use button::{button, ButtonResult};
+pub use container::container;
+pub use flex::{flex, hbox, vbox, Axis, CrossAxisAlignment, Flex, MainAxisAlignment, MainAxisSize};
+pub use slider::slider;
+pub use text::text;
+pub use textedit::text_line_edit;
 pub use window::window;
-pub use slider::{SliderTrack,Slider,slider};
-pub use container::{container};
 
-use crate::CompositionCtx;
-use crate::style::StyleSet;
+use crate::{style::StyleSet, CompositionCtx};
 use std::sync::Arc;
-
-

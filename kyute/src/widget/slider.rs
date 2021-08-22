@@ -3,15 +3,21 @@
 use crate::{
     core::Node,
     event::{Event, PointerEventKind},
-    BoxConstraints, CompositionCtx, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect,
-    SideOffsets, Size, Widget,
+    style::State,
+    theme, BoxConstraints, CompositionCtx, Environment, EventCtx, LayoutCtx, Measurements,
+    PaintCtx, Point, Rect, SideOffsets, Size, Widget,
 };
 use kyute_shell::drawing::{Brush, Color};
 use std::any::Any;
-use crate::theme::SLIDER_TRACK_STYLE;
+
+// TODO just pass f64 directly as the action?
+#[derive(Copy, Clone, Debug)]
+enum SliderAction {
+    ValueChanged(f64),
+}
 
 /// Utility class representing a slider track on which a knob can move.
-pub struct SliderTrack {
+struct SliderTrack {
     start: Point,
     end: Point,
 }
@@ -70,7 +76,7 @@ impl Default for SliderTrack {
     ctx.fill_rectangle(knob, &knob_brush);
 }*/
 
-pub struct Slider {
+struct Slider {
     track: SliderTrack,
     value: f64,
     min: f64,
@@ -82,7 +88,7 @@ impl Slider {
         Slider {
             // endpoints calculated during layout
             track: Default::default(),
-            value: value.clamp(min,max),
+            value: value.clamp(min, max),
             min,
             max,
         }
@@ -103,7 +109,6 @@ impl Slider {
 }
 
 impl Widget for Slider {
-
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
@@ -115,15 +120,15 @@ impl Widget for Slider {
                     ctx.request_redraw();
                 }
                 PointerEventKind::PointerDown => {
-                    self.update_value(p.position);
+                    let new_value = self.track.value_from_position(p.position, self.min, self.max);
+                    ctx.emit_action(SliderAction::ValueChanged(new_value));
                     ctx.capture_pointer();
                     ctx.request_focus();
-                    ctx.request_recomposition();
                 }
                 PointerEventKind::PointerMove => {
                     if ctx.is_capturing_pointer() {
-                        self.update_value(p.position);
-                        ctx.request_recomposition();
+                        let new_value = self.track.value_from_position(p.position, self.min, self.max);
+                        ctx.emit_action(SliderAction::ValueChanged(new_value));
                     }
                 }
                 _ => {}
@@ -137,6 +142,7 @@ impl Widget for Slider {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        _env: &Environment,
     ) -> Measurements {
         let height = 14.0; //env.get(theme::SliderHeight);
         let knob_width = 11.0; //env.get(theme::SliderKnobWidth);
@@ -169,12 +175,20 @@ impl Widget for Slider {
         }
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
-        let track_y = 9.0; //env.get(theme::SliderTrackY);
-        let track_h = 4.0; //env.get(theme::SliderTrackHeight);
-        let knob_w = 11.0; //env.get(theme::SliderKnobWidth);
-        let knob_h = 11.0; //env.get(theme::SliderKnobHeight);
-        let knob_y = 7.0; //env.get(theme::SliderKnobY);
+    fn paint(
+        &mut self,
+        ctx: &mut PaintCtx,
+        children: &mut [Node],
+        bounds: Rect,
+        env: &Environment,
+    ) {
+        let track_y = env.get(theme::SLIDER_TRACK_Y).unwrap_or_default();
+        let track_h = env.get(theme::SLIDER_TRACK_HEIGHT).unwrap_or_default();
+        let knob_w = env.get(theme::SLIDER_KNOB_WIDTH).unwrap_or_default();
+        let knob_h = env.get(theme::SLIDER_KNOB_HEIGHT).unwrap_or_default();
+        let knob_y = env.get(theme::SLIDER_KNOB_Y).unwrap_or_default();
+        let track_style = env.get(theme::SLIDER_TRACK_STYLE).unwrap();
+        let knob_style = env.get(theme::SLIDER_KNOB_STYLE).unwrap();
 
         let track_x_start = self.track.start.x;
         let track_x_end = self.track.end.x;
@@ -194,38 +208,75 @@ impl Widget for Slider {
         );
 
         // track
-        let brush = Brush::solid_color(ctx, Color::new(0.0, 0.0, 0.0, 1.0));
-        ctx.fill_rectangle(track_bounds, &brush);
-        ctx.fill_rectangle(knob_bounds, &brush);
-
-        //ctx.draw_styled_box_in_bounds("slider_track", track_bounds, PaletteIndex(0));
-        //ctx.draw_styled_box_in_bounds("slider_knob", knob_bounds, PaletteIndex(0));
+        track_style.draw_box(ctx, &track_bounds, State::empty());
+        knob_style.draw_box(ctx, &knob_bounds, State::empty());
     }
 }
 
-/// A slider.
+/*/// A slider.
 pub fn slider(cx: &mut CompositionCtx, min: f64, max: f64, value: &mut f64) {
     cx.enter(0);
-    crate::widget::container(cx, cx.get_env(&SLIDER_TRACK_STYLE).unwrap(), |cx| {
-        let v = *value;
-        cx.with_state(
-            || v,
-            |cx, prev_val| {
-                let changed_externally = prev_val != value;
-                cx.emit_node(
-                    |cx| Slider::new(min, max, v),
-                    |cx, slider| {
-                        if changed_externally {
-                            slider.set_value(v);
-                        } else {
-                            *value = slider.value;
-                        }
-                    },
-                    |_| {},
-                );
-                *prev_val = *value;
-            },
-        );
-    });
+    let v = *value;
+    cx.with_state(
+        || v,
+        |cx, prev_val| {
+            let changed_externally = prev_val != value;
+            cx.emit_node(
+                |cx| Slider::new(min, max, v),
+                |cx, slider| {
+                    if changed_externally {
+                        slider.set_value(v);
+                    } else {
+                        *value = slider.value;
+                    }
+                },
+                |_| {},
+            );
+            *prev_val = *value;
+        },
+    );
     cx.exit();
+}*/
+
+#[derive(Copy, Clone, Debug)]
+pub struct SliderResult(Option<SliderAction>);
+
+impl SliderResult {
+    pub fn on_value_change(&self, f: impl FnOnce(f64)) {
+        match self.0 {
+            None => {}
+            Some(SliderAction::ValueChanged(value)) => f(value),
+        }
+    }
+}
+
+/// Displays a slider widget.
+///
+/// Sliders can be used to pick a numeric value in a specified range.
+///
+/// # Arguments
+/// * `min` - lower bound of the slider range
+/// * `max` - upper bound of the slider range
+/// * `value` - current value of the slider.
+///
+/// # Return value
+/// A `SliderResult` object containing a possible followup action. See [`SliderResult`] for more information.
+///
+/// # Example
+/// ```rust
+/// // pick a value between 0.0 and 10.0.
+/// slider(cx, 0.0, 10.0, *current_value)
+///     .on_value_change(|new_value| *current_value = new_value);
+/// ```
+pub fn slider(cx: &mut CompositionCtx, min: f64, max: f64, value: f64) -> SliderResult {
+    cx.enter(0);
+    let action = cx.emit_node(
+        |cx| Slider::new(min, max, value),
+        |cx, slider| {
+            slider.set_value(value);
+        },
+        |_| {},
+    );
+    cx.exit();
+    SliderResult(action.cast())
 }

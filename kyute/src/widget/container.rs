@@ -1,8 +1,4 @@
-use crate::{
-    core::Node,
-    style::{State, StyleSet},
-    BoxConstraints, CompositionCtx, LayoutCtx, Measurements, PaintCtx, Rect, Widget,
-};
+use crate::{core::Node, style::{State, StyleSet}, BoxConstraints, CompositionCtx, LayoutCtx, Measurements, PaintCtx, Rect, Widget, Environment};
 
 struct Container {
     background: StyleSet,
@@ -14,6 +10,7 @@ impl Widget for Container {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        _env: &Environment
     ) -> Measurements {
         // expects only one children
         let mut measurements = Measurements::default();
@@ -24,7 +21,8 @@ impl Widget for Container {
         measurements
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect,
+             _env: &Environment) {
         self.background.draw_box(ctx, &bounds, State::empty());
         for c in children {
             c.paint(ctx);

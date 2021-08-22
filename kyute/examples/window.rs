@@ -1,32 +1,28 @@
-use kyute::{application, theme, CompositionCtx, Environment, get_default_application_style};
+use kyute::{
+    application, get_default_application_style, theme, widget::ButtonResult, CompositionCtx,
+    Environment,
+};
 use kyute_shell::{drawing::Color, platform::Platform};
-use kyute::widget::ButtonAction;
 
 fn gui(cx: &mut CompositionCtx) {
     use kyute::widget as w;
-
-    // equivalent with custom DSL:
-    /*let counter = 0;
-    Window {
-        Button {
-        .label = format!("click me: {}", counter)
-        }
-    }*/
-
-    //let env = Environment::new().add();
 
     cx.with_environment(get_default_application_style(), |cx| {
         cx.with_state(
             || 0.0,
             |cx, counter| {
-                // this closure will be called in a loop until the state doesn't change
                 w::window(cx, "Kyute main window", |cx| {
                     w::vbox(cx, |cx| {
                         w::button(cx, &format!("click me: {}", counter));
-                        if let Some(ButtonAction::Clicked) = w::button(cx, &format!("click me again: {}", counter)) {
-                            *counter += 42.0;
-                        }
-                        w::slider(cx, 0.0, 100.0, counter);
+                        w::button(cx, &format!("click me again: {}", counter))
+                            .on_click(|| *counter += 42.0);
+                        w::slider(cx, 0.0, 100.0, *counter).on_value_change(|x| *counter = x);
+
+                        cx.with_state(String::new, |cx, str| {
+                            w::text_line_edit(cx, str)
+                                .on_text_changed(|new_str| *str = new_str.to_string());
+                            w::text(cx, str);
+                        });
                     });
                 });
             },

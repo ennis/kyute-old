@@ -428,7 +428,7 @@ impl<'a, 'node> CompositionCtx<'a, 'node> {
     }
 
     /// Gets an environment value.
-    pub fn get_env<T: EnvValue>(&self, key: &EnvKey<T>) -> Option<T> {
+    pub fn get_env<T: EnvValue>(&self, key: EnvKey<T>) -> Option<T> {
         self.env.get(key)
     }
 
@@ -480,7 +480,8 @@ impl<'a, 'node> CompositionCtx<'a, 'node> {
         F: FnOnce(&mut Self, &mut T),
     {
         let key = Key::from_caller(0);
-        let _span = tracing::trace_span!("with_state", location=key.caller_location().file()).entered();
+        let _span =
+            tracing::trace_span!("with_state", location = key.caller_location().file()).entered();
         let (index, mut data) = self.composer.extract_state(key, init);
 
         // safety: by construction, if the key matches, then the call site is the same and thus
@@ -530,6 +531,7 @@ fn create_node<T: Widget>(
     event_loop: &EventLoopWindowTarget<()>,
     parent_window_id: Option<WindowId>,
     init: impl FnOnce(&mut InitCtx) -> T,
+    env: &Environment,
 ) -> Node {
     let node_id = NodeId::next();
     let mut init_ctx = InitCtx {
@@ -541,7 +543,13 @@ fn create_node<T: Widget>(
     let widget = Box::new(init(&mut init_ctx));
     let mut node: Node = unsafe {
         // safety: node_id was created with `NodeId::next()`
-        Node::new(widget, node_id, parent_window_id, init_ctx.window)
+        Node::new(
+            widget,
+            node_id,
+            parent_window_id,
+            init_ctx.window,
+            env.clone(),
+        )
     };
     node
 }
@@ -571,7 +579,13 @@ impl<'a, 'node> CompositionCtx<'a, 'node> {
             let child_count = self.node.children.len();
             let child_index = self.composer.emit_node(key, child_count);
             if child_index == child_count {
-                let node = create_node(self.app_ctx, self.event_loop, self.parent_window_id, init);
+                let node = create_node(
+                    self.app_ctx,
+                    self.event_loop,
+                    self.parent_window_id,
+                    init,
+                    &self.env,
+                );
                 let id = node.id;
                 self.node.children.push(node);
                 self.node.child_filter.add(&id);

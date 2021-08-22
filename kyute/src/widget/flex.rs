@@ -1,9 +1,4 @@
-use crate::{
-    core::{EventCtx, LayoutCtx, Node, PaintCtx, Widget},
-    event::Event,
-    layout::{BoxConstraints, Measurements},
-    CompositionCtx, Offset, Rect, Size,
-};
+use crate::{core::{EventCtx, LayoutCtx, Node, PaintCtx, Widget}, event::Event, layout::{BoxConstraints, Measurements}, CompositionCtx, Offset, Rect, Size, Environment};
 use tracing::trace;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -80,6 +75,7 @@ impl Widget for Flex {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        _env: &Environment
     ) -> Measurements {
         let child_measurements: Vec<Measurements> = children
             .iter_mut()
@@ -125,7 +121,7 @@ impl Widget for Flex {
         Measurements::new(size)
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect, _env: &Environment) {
         for c in children.iter_mut() {
             c.paint(ctx);
         }
@@ -133,11 +129,15 @@ impl Widget for Flex {
 }
 
 pub fn vbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
-    flex(cx, Axis::Vertical, contents)
+    cx.enter(0);
+    flex(cx, Axis::Vertical, contents);
+    cx.exit();
 }
 
 pub fn hbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
-    flex(cx, Axis::Horizontal, contents)
+    cx.enter(0);
+    flex(cx, Axis::Horizontal, contents);
+    cx.exit();
 }
 
 pub fn flex(cx: &mut CompositionCtx, axis: Axis, contents: impl FnMut(&mut CompositionCtx)) {

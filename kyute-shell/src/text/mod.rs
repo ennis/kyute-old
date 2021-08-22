@@ -397,8 +397,6 @@ impl TextLayout {
         // convert the text position to an utf-16 offset (inspired by piet-direct2d).
         let pos_utf16 = count_utf16(&self.text[0..text_position]);
 
-        //dbg!(pos_utf16);
-
         unsafe {
             let mut point_x = 0.0f32;
             let mut point_y = 0.0f32;

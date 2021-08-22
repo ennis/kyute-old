@@ -51,41 +51,6 @@ impl Default for Selection {
     }
 }
 
-// layout strategy:
-// - the text layout is calculated during widget layout, but also when an event causes the text to
-//   change
-// - update the text layout during painting if necessary
-
-pub struct TextEdit {
-    /// Formatting information.
-    text_format: TextFormat,
-
-    /// The text displayed to the user.
-    text: String,
-
-    background_style: Arc<StyleSet>,
-
-    /// The offset to the content area
-    content_offset: Offset,
-
-    /// The size of the content area
-    content_size: Size,
-
-    /// The text layout. None if not yet calculated.
-    ///
-    /// FIXME: due to DirectWrite limitations, the text layout contains a copy of the string.
-    /// in the future, de-duplicate.
-    text_layout: Option<TextLayout>,
-
-    /// The currently selected range. If no text is selected, this is a zero-length range
-    /// at the cursor position.
-    selection: Selection,
-
-    text_color: Color,
-    selection_color: Color,
-    selected_text_color: Color,
-}
-
 pub enum Movement {
     Left,
     Right,
@@ -103,26 +68,45 @@ fn next_grapheme_cluster(text: &str, offset: usize) -> Option<usize> {
     c.next_boundary(&text, 0).unwrap()
 }
 
+#[derive(Clone)]
+enum TextEditAction {
+    TextChanged(String),
+    SelectionChanged(Selection),
+}
+
+pub struct TextEdit {
+    /// Formatting information.
+    text_format: TextFormat,
+
+    /// The text displayed to the user.
+    text: String,
+
+    /// The offset to the content area
+    content_offset: Offset,
+
+    /// The size of the content area
+    content_size: Size,
+
+    /// The text layout. None if not yet calculated.
+    ///
+    /// FIXME: due to DirectWrite limitations, the text layout contains a copy of the string.
+    /// in the future, de-duplicate.
+    text_layout: Option<TextLayout>,
+
+    /// The currently selected range. If no text is selected, this is a zero-length range
+    /// at the cursor position.
+    selection: Selection,
+}
+
 impl TextEdit {
-    pub fn new(
-        text: impl Into<String>,
-        text_format: TextFormat,
-        background_style: Arc<StyleSet>,
-        text_color: Color,
-        selection_color: Color,
-        selected_text_color: Color,
-    ) -> TextEdit {
+    pub fn new(text: impl Into<String>) -> TextEdit {
         TextEdit {
-            text_format,
+            text_format: TextFormat::builder().size(14.0).build().unwrap(),
             text: text.into(),
-            background_style,
             content_offset: Default::default(),
             content_size: Default::default(),
             text_layout: None,
             selection: Default::default(),
-            text_color,
-            selection_color,
-            selected_text_color,
         }
     }
 
@@ -141,7 +125,8 @@ impl TextEdit {
                     .unwrap_or(self.selection.end),
                 Movement::LeftWord | Movement::RightWord => {
                     // TODO word navigation (unicode word segmentation)
-                    unimplemented!()
+                    tracing::warn!("word navigation is unimplemented");
+                    self.selection.end
                 }
             };
 
@@ -182,9 +167,10 @@ impl TextEdit {
         self.selection.end = self.text.len();
     }
 
-    fn position_to_text(&mut self, pos: Point) -> usize {
+    fn position_to_text(&self, pos: Point) -> usize {
         let hit = self
             .text_layout
+            .as_ref()
             .expect("position_to_text called before layout")
             .hit_test_point(pos)
             .unwrap();
@@ -203,8 +189,9 @@ impl Widget for TextEdit {
         _ctx: &mut LayoutCtx,
         _children: &mut [Node],
         constraints: &BoxConstraints,
+        env: &Environment,
     ) -> Measurements {
-        let padding = self.background_style.content_padding();
+        let padding = env.get(theme::TEXT_EDIT_PADDING).unwrap_or_default();
         let font_size = self.text_format.font_size() as f64;
 
         const SELECTION_MAGIC: f64 = 3.0;
@@ -236,19 +223,31 @@ impl Widget for TextEdit {
         Measurements { size, baseline }
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
+    fn paint(
+        &mut self,
+        ctx: &mut PaintCtx,
+        children: &mut [Node],
+        bounds: Rect,
+        env: &Environment,
+    ) {
         let bounds = ctx.bounds();
         let text_layout = self
             .text_layout
             .as_mut()
             .expect("paint called before layout");
 
-        //self.background_style.draw_box(ctx, &bounds, State::ACTIVE, )
+        let background_style = env.get(theme::TEXT_EDIT_BACKGROUND_STYLE).unwrap();
+        background_style.draw_box(ctx, &bounds, State::ACTIVE);
 
-        //ctx.draw_styled_box("text_box", style::PaletteIndex(0));
-        let text_brush = Brush::solid_color(ctx, self.text_color);
-        let selected_bg_brush = Brush::solid_color(ctx, self.selection_color);
-        let selected_text_brush = Brush::solid_color(ctx, self.selected_text_color);
+        let text_color = env.get(theme::TEXT_COLOR).unwrap_or_default();
+        let selected_text_color = env.get(theme::SELECTED_TEXT_COLOR).unwrap_or_default();
+        let selected_background_color = env
+            .get(theme::SELECTED_TEXT_BACKGROUND_COLOR)
+            .unwrap_or_default();
+
+        let text_brush = Brush::solid_color(ctx, text_color);
+        let selected_bg_brush = Brush::solid_color(ctx, selected_background_color);
+        let selected_text_brush = Brush::solid_color(ctx, selected_text_color);
 
         ctx.save();
         ctx.transform(&self.content_offset.to_transform());
@@ -269,7 +268,7 @@ impl Widget for TextEdit {
                 .hit_test_text_range(self.selection.min()..self.selection.max(), &bounds.origin)
                 .unwrap();
             for sa in selected_areas {
-                ctx.fill_rectangle(dbg!(sa.bounds.round_out()), &selected_bg_brush);
+                ctx.fill_rectangle(sa.bounds.round_out(), &selected_bg_brush);
             }
         }
 
@@ -348,6 +347,7 @@ impl Widget for TextEdit {
                             self.move_cursor(Movement::Left, true);
                         }
                         self.insert("");
+                        ctx.emit_action(TextEditAction::TextChanged(self.text.clone()));
                         ctx.request_relayout();
                     }
                     keyboard_types::Key::Delete => {
@@ -355,6 +355,7 @@ impl Widget for TextEdit {
                             self.move_cursor(Movement::Right, true);
                         }
                         self.insert("");
+                        ctx.emit_action(TextEditAction::TextChanged(self.text.clone()));
                         ctx.request_relayout();
                     }
                     keyboard_types::Key::ArrowLeft => {
@@ -369,6 +370,7 @@ impl Widget for TextEdit {
                         // reject control characters (handle in KeyDown instead)
                         //trace!("insert {:?}", input.character);
                         self.insert(&c);
+                        ctx.emit_action(TextEditAction::TextChanged(self.text.clone()));
                         ctx.request_relayout();
                     }
                     _ => {}
@@ -382,9 +384,6 @@ impl Widget for TextEdit {
     }
 }
 
-pub const TEXT_EDIT_BOX_STYLE_SET: EnvKey<Arc<StyleSet>> =
-    EnvKey::new("kyute.text-edit.box-style-set");
-
 struct EditState {
     text: String,
     selection: Selection,
@@ -394,7 +393,7 @@ impl EditState {
     pub fn new(text: String) -> EditState {
         EditState {
             text,
-            selection: Default::default()
+            selection: Default::default(),
         }
     }
 
@@ -404,78 +403,49 @@ impl EditState {
     }
 }
 
-fn core_line_edit(
-    cx: &mut CompositionCtx,
-    text: &mut String,
-    background_style: Arc<StyleSet>,
-    text_format: TextFormat,
-    text_color: Color,
-    selection_color: Color,
-    selected_text_color: Color,
-) {
-    cx.enter(0);
-    cx.with_state(
-        || EditState::new(text.clone()),
-        |cx, edit_state| {
+/// Describes changes or events that happened on a text edit widget.
+#[derive(Clone)]
+pub struct TextEditResult(Option<TextEditAction>);
 
-            edit_state.set_text(text.clone());
+impl TextEditResult {
+    /// Calls the specified closure if the edited text has changed.
+    pub fn on_text_changed(&self, f: impl FnOnce(&str)) {
+        match &self.0 {
+            Some(TextEditAction::TextChanged(str)) => f(str),
+            _ => {}
+        }
+    }
 
-            w::container(cx, TEXT_EDIT_BOX_STYLE_SET, |cx| {
-                w::core_text(cx, /*text*/ &edit_state.text, /*text format*/ text_format)
-                // selection box
-                // issue: we want access to post-layout information here, but how?
-                // -> modifiers
-            });
-
-            let changed_externally = prev_text != text;
-            cx.emit_node(
-                |cx| {
-                    TextEdit::new(
-                        text.clone(),
-                        text_format.clone(),
-                        background_style.clone(),
-                        text_color,
-                        selection_color,
-                        selected_text_color,
-                    )
-                },
-                |cx, text_edit| {
-                    let mut needs_relayout = false;
-                    if changed_externally {
-                        text_edit.set_text(text.clone());
-                        needs_relayout = true;
-                    } else {
-                        *text = text_edit.text.clone()
-                    }
-
-                    // it's a bit annoying to update every property by hand
-                    // It would be better to just rebuild the whole text edit if it changes.
-                    // However, this would erase the current selection.
-                    // Instead, compose more:
-                    // - render the text with a "text" composable
-                    // - store the current selection as state
-                    needs_relayout |= text_edit.set_text_format(text_format.clone());
-                    needs_relayout |= text_edit.set_background_style(background_style.clone());
-                    needs_relayout |= text_edit.set_text_color(text_color);
-                    needs_relayout |= text_edit.set_selection_color(selection_color);
-                    needs_relayout |= text_edit.set_selected_text_color(selected_text_color);
-                },
-                |_| {},
-            );
-        },
-    );
-    cx.exit();
+    /// Calls the specified closure if the current selection has changed.
+    pub fn on_selection_changed(&self, f: impl FnOnce(&Selection)) {
+        match &self.0 {
+            Some(TextEditAction::SelectionChanged(s)) => f(s),
+            _ => {}
+        }
+    }
 }
 
-/// Text editor line.
-pub fn text_line_edit(cx: &mut CompositionCtx, text: &mut String) {
-    text_line_edit_impl(
-        cx,
-        text,
-        cx.get_env(&TEXT_EDIT_BOX_STYLE_SET),
-        cx.get_env(&theme::DEFAULT_TEXT_FORMAT),
-        cx.get_env(&theme::TEXT_COLOR),
-        cx.get_env(&theme::SELECTED_TEXT_BACKGROUND_COLOR),
-        cx.get_env(&theme::SELECTED_TEXT_COLOR),
-    )
+/// Displays a single-line text editor widget.
+///
+/// TODO generalites (selection state, cursor, etc.)
+///
+/// The text appearance is controlled by the following environment variables: TODO.
+///
+/// # Arguments
+/// * `text` - the text to display.
+///
+/// # Return value
+/// A [`TextEditResult`] object that describes changes or events that happened on the widget.
+///
+pub fn text_line_edit(cx: &mut CompositionCtx, text: &str) -> TextEditResult {
+    cx.enter(0);
+    let action = cx.emit_node(
+        |cx| TextEdit::new(text.clone()),
+        |cx, text_edit| {
+            text_edit.set_text(text.clone());
+        },
+        |_| {},
+    );
+    cx.exit();
+    TextEditResult(action.cast())
 }

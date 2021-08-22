@@ -1,12 +1,7 @@
-use crate::{
-    core::{
-        EventCtx, FocusAction, LayoutCtx, Node, PaintCtx, RepaintRequest, Widget,
-        WindowPaintCtx,
-    },
-    event::{Event, InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind},
-    layout::{BoxConstraints, Measurements},
-    NodeId, PhysicalSize, Point, Rect, Size,
-};
+use crate::{core::{
+    EventCtx, FocusAction, LayoutCtx, Node, PaintCtx, RepaintRequest, Widget,
+    WindowPaintCtx,
+}, event::{Event, InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind}, layout::{BoxConstraints, Measurements}, NodeId, PhysicalSize, Point, Rect, Size, Environment};
 use keyboard_types::KeyState;
 use kyute_shell::{
     drawing::Color,
@@ -102,6 +97,7 @@ impl Widget for WindowWidget {
         ctx: &mut LayoutCtx,
         children: &mut [Node],
         constraints: &BoxConstraints,
+        _env: &Environment,
     ) -> Measurements {
         // layout children
         let window_size = ctx.parent_window_size();
@@ -112,7 +108,8 @@ impl Widget for WindowWidget {
         Measurements::default()
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect) {
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect,
+             _env: &Environment) {
         for c in children.iter_mut() {
             c.paint(ctx);
         }

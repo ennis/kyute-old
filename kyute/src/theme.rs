@@ -41,6 +41,7 @@ pub const TEXT_EDIT_PADDING: EnvKey<SideOffsets> = EnvKey::new("kyute.theme.text
 pub const TEXT_EDIT_CARET_COLOR: EnvKey<Color> = EnvKey::new("kyute.theme.text_edit_caret_color"); // [Color::new(1.0,1.0,1.0,1.0)];
 pub const TEXT_EDIT_BORDER_COLOR : EnvKey<Color> = EnvKey::new("kyute.theme.text_edit_border_color"); // [Color::new(0.0,0.0,0.0,1.0)];
 pub const TEXT_EDIT_BACKGROUND_COLOR : EnvKey<Color> = EnvKey::new("kyute.theme.text_edit_background_color"); // [Color::new(1.0,1.0,1.0,1.0)];
+pub const TEXT_EDIT_BACKGROUND_STYLE : EnvKey<StyleSet> = EnvKey::new("kyute.theme.text_edit_background_style");
 pub const TEXT_EDIT_BORDER_WIDTH : EnvKey<f64> = EnvKey::new("kyute.theme.text_edit_border_width"); // [1.0];
 pub const TEXT_COLOR : EnvKey<Color> = EnvKey::new("kyute.theme.text_color"); // [Color::new(0.96,0.96,0.96,1.0)];
 pub const SELECTED_TEXT_BACKGROUND_COLOR : EnvKey<Color> = EnvKey::new("kyute.theme.selected_text_background_color"); // [Color::new(0.6,0.6,0.8,1.0)];
@@ -50,7 +51,6 @@ pub const DEFAULT_TEXT_FORMAT : EnvKey<TextFormat> = EnvKey::new("kyute.theme.te
 pub const BUTTON_STYLE : EnvKey<StyleSet> = EnvKey::new("kyute.theme.button_style");
 pub const SLIDER_KNOB_STYLE : EnvKey<StyleSet> = EnvKey::new("kyute.theme.slider_knob_style");
 pub const SLIDER_TRACK_STYLE : EnvKey<StyleSet> = EnvKey::new("kyute.theme.slider_track_style");
-pub const TEXT_BOX_BACKGROUND_STYLE : EnvKey<StyleSet> = EnvKey::new("kyute.theme.text_box_background_style");
 
 /*
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

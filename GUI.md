@@ -382,3 +382,16 @@ Maybe just do pointer equality, as with Environment?
       - "Naked" mutable state is not supported (mutation happens in callbacks, not during recomp; recomp is triggered because of a state change)
         
 
+# When to use composable functions vs widgets
+
+Sometimes, it's simply more convenient to implement behavior in the widget implementation. For instance, if you have
+a widget with many different parts that do not react to events, it might be more convenient to draw them all at once 
+in the widget implementation. 
+
+
+# Widgets
+- drop downs
+- spinners
+- 3D view
+- color picker
+- text edit
