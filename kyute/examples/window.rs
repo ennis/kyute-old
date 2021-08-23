@@ -21,6 +21,20 @@ fn gui(cx: &mut CompositionCtx) {
                         cx.with_state(String::new, |cx, str| {
                             w::text_line_edit(cx, str)
                                 .on_text_changed(|new_str| *str = new_str.to_string());
+
+                            // there are two copies of the string:
+                            // - the one stored by the user as part of their app state: "user state"
+                            // - the internal string stored by the LineEdit: "internal state"
+
+                            // 1. LineEdit is created with a string "A"
+                            // 2. a character is inserted, the internal state is set to "AB"
+                            // 3. this triggers recomposition: text_line_edit is called again,
+                            //    with the user string, which still contains "A"
+                            // 4. since user state ("A") != internal state ("AB"), internal state is updated to "A" => the internal selection is cleared
+                            // 5. the "TextChanged" action is dequeued: user state is updated to "AB"
+                            //
+                            // Solution: in emit_node, don't update
+
                             w::text(cx, str);
                         });
                     });
@@ -33,7 +47,7 @@ fn gui(cx: &mut CompositionCtx) {
 fn main() {
     Platform::init();
     tracing_subscriber::fmt()
-        .pretty()
+        .compact()
         .with_target(false)
         //.with_level(false)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

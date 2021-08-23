@@ -111,8 +111,13 @@ impl TextEdit {
     }
 
     pub fn set_text(&mut self, text: impl Into<String>) {
-        self.text_layout = None;
-        self.text = text.into();
+        let text = text.into();
+        if self.text != text {
+            tracing::trace!("set_text: text has changed, removing selection");
+            self.text_layout = None;
+            self.text = text;
+            self.selection = Default::default();
+        }
     }
 
     /// Moves the cursor forward or backward.
@@ -301,12 +306,12 @@ impl Widget for TextEdit {
 
     fn event(&mut self, ctx: &mut EventCtx, children: &mut [Node], event: &Event) {
         match event {
-            Event::FocusIn => {
-                trace!("focus in");
+            Event::FocusGained => {
+                trace!("text edit: focus gained");
                 ctx.request_redraw();
             }
-            Event::FocusOut => {
-                trace!("focus out");
+            Event::FocusLost => {
+                trace!("text edit: focus lost");
                 let pos = self.selection.end;
                 self.set_cursor(pos);
                 ctx.request_redraw();
@@ -343,6 +348,7 @@ impl Widget for TextEdit {
             Event::Keyboard(k) => match k.state {
                 KeyState::Down => match k.key {
                     keyboard_types::Key::Backspace => {
+                        trace!("text edit: backspace");
                         if self.selection.is_empty() {
                             self.move_cursor(Movement::Left, true);
                         }
@@ -351,6 +357,7 @@ impl Widget for TextEdit {
                         ctx.request_relayout();
                     }
                     keyboard_types::Key::Delete => {
+                        trace!("text edit: delete");
                         if self.selection.is_empty() {
                             self.move_cursor(Movement::Right, true);
                         }
@@ -369,6 +376,7 @@ impl Widget for TextEdit {
                     keyboard_types::Key::Character(ref c) => {
                         // reject control characters (handle in KeyDown instead)
                         //trace!("insert {:?}", input.character);
+                        trace!("text edit: character {}", c);
                         self.insert(&c);
                         ctx.emit_action(TextEditAction::TextChanged(self.text.clone()));
                         ctx.request_relayout();

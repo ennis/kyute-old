@@ -591,13 +591,25 @@ impl<'a, 'node> CompositionCtx<'a, 'node> {
                 self.node.child_filter.add(&id);
                 self.app_ctx.request_relayout();
             } else {
-                let t =
-                    downcast_widget_unchecked::<T>(self.node.children[child_index].widget.as_mut());
-                let mut update_ctx = UpdateCtx {
-                    app_ctx: self.app_ctx,
-                    event_loop: self.event_loop,
-                };
-                update(&mut update_ctx, t);
+                // Do not run `update` if the node has pending actions:
+                // Before we can update the node, we must first process all pending actions, which
+                // might affect the application state, and in turn affect the node itself.
+                // Once all actions have dequeued, the state application state should have
+                // "stabilized", and the node can be updated.
+                //
+                // In theory, this is not necessary, but in practice this reduces the number of calls
+                // to `update` and avoids unnecessary invalidation of internal state.
+                let node = &mut self.node.children[child_index];
+                if node.pending_actions.is_empty() {
+                    // SAFETY: ensured by the `do_emit_node` call contract.
+                    let t =
+                        downcast_widget_unchecked::<T>(node.widget.as_mut());
+                    let mut update_ctx = UpdateCtx {
+                        app_ctx: self.app_ctx,
+                        event_loop: self.event_loop,
+                    };
+                    update(&mut update_ctx, t);
+                }
             }
             child_index
         };
@@ -607,8 +619,8 @@ impl<'a, 'node> CompositionCtx<'a, 'node> {
         // recursively recompose the emitted node
         node.recompose(self.app_ctx, self.event_loop, self.env.clone(), contents);
 
-        // if the emitted node has more than one pending action, we schedule a recomposition
-        // so that all pending actions are dequeued
+        // If the emitted node has pending actions, we process them first, and then issue
+        // a recomposition in case the application state changed as a result of the action.
         if node.pending_actions.len() > 1 {
             self.recompose_after = true;
         }

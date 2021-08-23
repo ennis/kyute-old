@@ -131,8 +131,6 @@ pub enum Event {
     Keyboard(KeyboardEvent),
     /// A composition event.
     Composition(CompositionEvent),
-    FocusIn,
-    FocusOut,
 }
 
 impl Event {

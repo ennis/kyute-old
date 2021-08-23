@@ -211,4 +211,10 @@ pub fn get_default_application_style() -> Environment {
         .add(theme::SLIDER_KNOB_HEIGHT, 11.0)
         .add(theme::SLIDER_KNOB_Y, 7.0)
         .add(theme::SLIDER_HEIGHT, 14.0)
+        .add(theme::TEXT_EDIT_CARET_COLOR, Color::new(1.0,1.0,1.0,1.0))
+        .add(theme::TEXT_EDIT_BORDER_COLOR, Color::new(0.0,0.0,0.0,1.0))
+        .add(theme::TEXT_EDIT_BACKGROUND_COLOR, Color::new(1.0,1.0,1.0,1.0))
+        .add(theme::TEXT_COLOR, Color::new(0.96,0.96,0.96,1.0))
+        .add(theme::SELECTED_TEXT_BACKGROUND_COLOR, Color::new(0.6,0.6,0.8,1.0))
+        .add(theme::SELECTED_TEXT_COLOR, Color::new(1.0,1.0,1.0,1.0))
 }

@@ -388,6 +388,20 @@ Sometimes, it's simply more convenient to implement behavior in the widget imple
 a widget with many different parts that do not react to events, it might be more convenient to draw them all at once 
 in the widget implementation. 
 
+# Conflict between internal and external state during recomposition when an action is emitted
+Consider a text editor widget.
+there are two copies of the string:
+ - the one stored by the user as part of their app state: "user (or external) state"
+ - the internal string stored by the LineEdit: "internal state"
+
+ 1. LineEdit is created with a string "A"
+ 2. a character is inserted, the internal state is set to "AB"
+ 3. this triggers recomposition: text_line_edit is called again, 
+    with the user string, which still contains "A"
+ 4. since user state ("A") != internal state ("AB"), internal state is updated to "A" => the internal selection is cleared
+ 5. the "TextChanged" action is dequeued: user state is updated to "AB"
+ 
+Solution: in emit_node, don't run update() if there are pending actions. 
 
 # Widgets
 - drop downs
@@ -395,3 +409,4 @@ in the widget implementation.
 - 3D view
 - color picker
 - text edit
+  - I-beam cursor on hover 

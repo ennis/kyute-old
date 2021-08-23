@@ -441,6 +441,7 @@ fn key_code_from_winit(
             VirtualKeyCode::Copy => Key::Copy,
             VirtualKeyCode::Paste => Key::Paste,
             VirtualKeyCode::Cut => Key::Cut,
+            VirtualKeyCode::Back => Key::Backspace,
             _ => Key::Unidentified,
         }
     } else {
@@ -508,7 +509,8 @@ impl WindowState {
         // Some input events (pointer, keyboard) are also converted to normal events delivered
         // to the widgets within the window.
         let event = match window_event {
-            WindowEvent::ReceivedCharacter(c) => {
+            // don't send Character events for control characters
+            WindowEvent::ReceivedCharacter(c) if !c.is_control() => {
                 Some(Event::Keyboard(KeyboardEvent {
                     state: KeyState::Down,
                     key: keyboard_types::Key::Character(c.to_string()),
