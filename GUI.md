@@ -401,7 +401,12 @@ there are two copies of the string:
  4. since user state ("A") != internal state ("AB"), internal state is updated to "A" => the internal selection is cleared
  5. the "TextChanged" action is dequeued: user state is updated to "AB"
  
-Solution: in emit_node, don't run update() if there are pending actions. 
+Solution: in emit_node, don't run update() if there are pending actions.
+
+# Architecture decision: store actions in a top level queue
+Don't store actions within the node, and don't process all actions within the same composition pass: this causes problems.
+Instead, it is simpler to add actions to a top-level queue and process them in sequence.
+
 
 # Widgets
 - drop downs
@@ -410,3 +415,20 @@ Solution: in emit_node, don't run update() if there are pending actions.
 - color picker
 - text edit
   - I-beam cursor on hover 
+
+# Investigate the possibility of recomposing locally
+Currently, whenever a composable should be re-run, parent composable must run as well, since there's no way to run the composable function in isolation.
+To do so, we'd need to store a copy of the function parameters (in a way, a copy of the whole invocation).
+This would require all arguments of composables to be `Data`. It also means that it would be impossible to pass things
+by reference (no more `&str`, must use `Arc<str>`, etc.)
+
+Pros:
+- recomposition can be done locally: each scope owns a copy of the invocation, which can be run independently of the parent.
+
+Cons:
+- composables cannot "return" anything: how can they modify state?
+
+Widget delegates directly call handlers, which update parts of the state
+-> any mutable state must be wrapped
+-> we end up with lenses, which defeats the purpose of composables in the first place 
+

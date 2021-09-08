@@ -38,14 +38,14 @@ const SWAP_CHAIN_BUFFERS: u32 = 2;
 /// [`DrawContext`]: crate::drawing::context::DrawContext
 pub struct WindowDrawContext<'a> {
     window: &'a mut PlatformWindow,
-    draw_context: DrawContext<'a>,
+    draw_context: DrawContext,
 }
 
 impl<'a> WindowDrawContext<'a> {
     /// Creates a new [`WindowDrawContext`] for the specified window, allowing to draw on the window.
     pub fn new(window: &'a mut PlatformWindow) -> WindowDrawContext<'a> {
         let platform = Platform::instance();
-        let d2d_device_context = platform.d2d_device_context.lock().unwrap();
+        let d2d_device_context = &platform.0.d2d_device_context;
 
         let swap_chain = &window.swap_chain;
         let backbuffer = unsafe { swap_chain.GetBuffer::<IDXGISurface>(0).unwrap() };
@@ -78,7 +78,7 @@ impl<'a> WindowDrawContext<'a> {
             d2d_device_context.SetDpi(dpi, dpi);
             // the draw context acquires shared ownership of the device context, but that's OK since we borrow the window,
             // so we can't create another WindowDrawContext that would conflict with it.
-            DrawContext::from_device_context(platform.d2d_factory.0.clone(), d2d_device_context)
+            DrawContext::from_device_context(platform.0.d2d_factory.0.clone(), d2d_device_context.0.clone())
         };
 
         WindowDrawContext {
@@ -104,8 +104,8 @@ impl<'a> Drop for WindowDrawContext<'a> {
 }
 
 impl<'a> Deref for WindowDrawContext<'a> {
-    type Target = DrawContext<'a>;
-    fn deref(&self) -> &DrawContext<'a> {
+    type Target = DrawContext;
+    fn deref(&self) -> &DrawContext {
         &self.draw_context
     }
 }
@@ -194,8 +194,8 @@ impl PlatformWindow {
         }
         let window = builder.build(event_loop).map_err(Error::Winit)?;
 
-        let dxgi_factory = &platform.dxgi_factory;
-        let d3d11_device = &platform.d3d11_device;
+        let dxgi_factory = &platform.0.dxgi_factory;
+        let d3d11_device = &platform.0.d3d11_device;
 
         // create a DXGI swap chain for the window
         let hinstance = HINSTANCE(window.hinstance() as isize);

@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 use kyute_shell::text::{TextFormat, TextLayout};
-use crate::style::StyleSet;
+//use crate::style::StyleSet;
 
 /// A type that identifies a named value in an [`Environment`], of a particular type `T`.
 ///
@@ -66,7 +66,6 @@ impl_env_value!(String);
 impl_env_value!(SideOffsets);
 impl_env_value!(TextFormat);
 impl_env_value!(TextLayout);
-impl_env_value!(StyleSet);
 
 impl<T: Any> EnvValue for Arc<T> {
     fn as_any(&self) -> &dyn Any {

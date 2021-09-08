@@ -1,7 +1,7 @@
 use crate::{
     align_boxes,
     composition::CompositionCtx,
-    core::{EventCtx, LayoutCtx, Node, PaintCtx, Widget},
+    core::{EventCtx, LayoutCtx, Widget, PaintCtx, WidgetDelegate},
     env::Environment,
     event::{Event, PointerEventKind},
     layout::{BoxConstraints, Measurements},
@@ -31,7 +31,7 @@ impl ButtonResult {
 
 struct Button;
 
-impl Widget for Button {
+impl WidgetDelegate for Button {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
@@ -39,7 +39,7 @@ impl Widget for Button {
     fn event(
         &mut self,
         ctx: &mut EventCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         event: &Event,
     ) {
         match event {
@@ -66,7 +66,7 @@ impl Widget for Button {
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         constraints: &BoxConstraints,
         _env: &Environment
     ) -> Measurements {
@@ -106,7 +106,7 @@ impl Widget for Button {
     fn paint(
         &mut self,
         ctx: &mut PaintCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         bounds: Rect,
         _env: &Environment
     ) {

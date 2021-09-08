@@ -18,7 +18,7 @@ use std::{ptr, rc::Rc, sync::Arc};
 use kyute_shell::drawing::Color;
 use crate::SideOffsets;
 use kyute_shell::text::{TextFormat, TextLayout};
-use crate::style::StyleSet;
+//use crate::style::StyleSet;
 
 pub trait Data: Clone + 'static {
     fn same(&self, other: &Self) -> bool;

@@ -145,25 +145,30 @@ impl CompositeMode {
     }
 }
 
-pub struct DrawContext<'a> {
-    pub(crate) ctx: MutexGuard<'a, D2D1DeviceContext>,
+pub struct DrawContext {
+    pub(crate) ctx: ID2D1DeviceContext,
     pub(crate) factory: ID2D1Factory1,
     save_states: Vec<SaveState>,
     transform: Transform,
 }
 
-impl<'a> Drop for DrawContext<'a> {
+impl Drop for DrawContext {
     fn drop(&mut self) {
         self.end_draw()
     }
 }
 
-impl<'a> DrawContext<'a> {
+impl DrawContext {
     /// Acquires (shared) ownership of the device context.
     /// A target must already be set on the DC with SetTarget.
+    ///
+    /// # Safety contract:
+    /// TODO :
+    /// - device context not used on another thread?
+    /// - called on main thread?
     pub(crate) unsafe fn from_device_context(
         factory: ID2D1Factory1,
-        device_context: MutexGuard<'a, D2D1DeviceContext>,
+        device_context: ID2D1DeviceContext,
     ) -> DrawContext {
         device_context.BeginDraw();
         DrawContext {
@@ -275,7 +280,7 @@ impl<'a> DrawContext<'a> {
     }
 }
 
-impl<'a> DrawContext<'a> {
+impl DrawContext {
     pub fn clear(&mut self, color: Color) {
         unsafe {
             self.ctx.Clear(&mk_color_f(color));

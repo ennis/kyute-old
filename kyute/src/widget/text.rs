@@ -1,7 +1,7 @@
 //! Text elements
 use crate::{
-    core::Node, event::Event, BoxConstraints, CompositionCtx, EventCtx, LayoutCtx, Measurements,
-    PaintCtx, Point, Rect, Widget,
+    core::Widget, event::Event, BoxConstraints, CompositionCtx, EventCtx, LayoutCtx, Measurements,
+    PaintCtx, Point, Rect, WidgetDelegate,
 };
 use kyute_shell::{
     drawing::{Brush, Color, DrawTextOptions},
@@ -29,20 +29,20 @@ impl Text {
     }
 }
 
-impl Widget for Text {
+impl WidgetDelegate for Text {
 
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Node], event: &Event) {
+    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {
         // nothing
     }
 
     fn layout(
         &mut self,
         _ctx: &mut LayoutCtx,
-        _children: &mut [Node],
+        _children: &mut [Widget],
         constraints: &BoxConstraints,
         _env: &Environment
     ) -> Measurements {
@@ -69,7 +69,7 @@ impl Widget for Text {
         Measurements { size, baseline }
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect, _env: &Environment) {
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Widget], bounds: Rect, _env: &Environment) {
         let text_brush = Brush::solid_color(ctx, Color::new(0.92, 0.92, 0.92, 1.0));
 
         if let Some(ref text_layout) = self.text_layout {

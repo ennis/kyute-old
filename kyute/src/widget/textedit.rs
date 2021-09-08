@@ -1,11 +1,12 @@
 //! Text editor widget.
 use crate::{
-    core::Node,
+    core::Widget,
+    data::Data,
     env::Environment,
     event::{Event, Modifiers, PointerEventKind},
     style::{State, StyleSet},
-    theme, BoxConstraints, CompositionCtx, EnvKey, EventCtx, Key, LayoutCtx, Measurements, Offset,
-    PaintCtx, Point, Rect, SideOffsets, Size, Widget,
+    theme, BoxConstraints, CompositionCtx, EnvKey, EventCtx, CallKey, LayoutCtx, Measurements, Offset,
+    PaintCtx, Point, Rect, SideOffsets, Size, WidgetDelegate,
 };
 use keyboard_types::KeyState;
 use kyute_shell::{
@@ -24,7 +25,7 @@ use unicode_segmentation::GraphemeCursor;
 /// user started the selection gesture from a later point in the text and then went back
 /// (right-to-left in LTR languages). In this case, the cursor will appear at the "beginning"
 /// (i.e. left, for LTR) of the selection.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Selection {
     pub start: usize,
     pub end: usize,
@@ -74,12 +75,50 @@ enum TextEditAction {
     SelectionChanged(Selection),
 }
 
+#[derive(Clone, Eq, PartialEq, Hash)]
+/// Text editor state
+pub struct TextEditState {
+    /// The displayed text.
+    text: String,
+
+    /// The currently selected range. If no text is selected, this is a zero-length range
+    /// at the cursor position.
+    selection: Selection,
+}
+
+impl Data for TextEditState {
+    fn same(&self, other: &Self) -> bool {
+        self.text.same(&other.text) && self.selection == other.selection
+    }
+}
+
+impl TextEditState {
+    /// Creates a new text edit state with the given text, the cursor at the beginning, and nothing selected.
+    pub fn new(text: String) -> TextEditState {
+        TextEditState {
+            text,
+            selection: Default::default(),
+        }
+    }
+
+    /// Sets the text.
+    pub fn set_text(&mut self, text: String) {
+        self.text = text;
+        // TODO: truncate selection if necessary
+    }
+
+    /// Sets the selection (and cursor position).
+    pub fn set_selection(&mut self, selection: Selection) {
+        self.selection = selection;
+    }
+}
+
 pub struct TextEdit {
     /// Formatting information.
     text_format: TextFormat,
 
-    /// The text displayed to the user.
-    text: String,
+    /// Text editing state.
+    state: TextEditState,
 
     /// The offset to the content area
     content_offset: Offset,
@@ -92,84 +131,80 @@ pub struct TextEdit {
     /// FIXME: due to DirectWrite limitations, the text layout contains a copy of the string.
     /// in the future, de-duplicate.
     text_layout: Option<TextLayout>,
-
-    /// The currently selected range. If no text is selected, this is a zero-length range
-    /// at the cursor position.
-    selection: Selection,
 }
 
 impl TextEdit {
-    pub fn new(text: impl Into<String>) -> TextEdit {
+    pub fn new(state: TextEditState) -> TextEdit {
         TextEdit {
             text_format: TextFormat::builder().size(14.0).build().unwrap(),
-            text: text.into(),
+            state,
             content_offset: Default::default(),
             content_size: Default::default(),
             text_layout: None,
-            selection: Default::default(),
         }
     }
 
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        let text = text.into();
-        if self.text != text {
-            tracing::trace!("set_text: text has changed, removing selection");
+    pub fn set_state(&mut self, state: TextEditState) {
+        if self.state != state {
+            self.state = state;
             self.text_layout = None;
-            self.text = text;
-            self.selection = Default::default();
         }
     }
 
     /// Moves the cursor forward or backward.
+    // TODO move to EditState
     pub fn move_cursor(&mut self, movement: Movement, modify_selection: bool) {
-        let offset =
-            match movement {
-                Movement::Left => prev_grapheme_cluster(&self.text, self.selection.end)
-                    .unwrap_or(self.selection.end),
-                Movement::Right => next_grapheme_cluster(&self.text, self.selection.end)
-                    .unwrap_or(self.selection.end),
-                Movement::LeftWord | Movement::RightWord => {
-                    // TODO word navigation (unicode word segmentation)
-                    tracing::warn!("word navigation is unimplemented");
-                    self.selection.end
-                }
-            };
+        let offset = match movement {
+            Movement::Left => prev_grapheme_cluster(&self.state.text, self.state.selection.end)
+                .unwrap_or(self.state.selection.end),
+            Movement::Right => next_grapheme_cluster(&self.state.text, self.state.selection.end)
+                .unwrap_or(self.state.selection.end),
+            Movement::LeftWord | Movement::RightWord => {
+                // TODO word navigation (unicode word segmentation)
+                tracing::warn!("word navigation is unimplemented");
+                self.state.selection.end
+            }
+        };
 
         if modify_selection {
-            self.selection.end = offset;
+            self.state.selection.end = offset;
         } else {
-            self.selection = Selection::empty(offset);
+            self.state.selection = Selection::empty(offset);
         }
     }
 
     /// Inserts text.
+    // TODO move to EditState
     pub fn insert(&mut self, text: &str) {
-        let min = self.selection.min();
-        let max = self.selection.max();
-        self.text.replace_range(min..max, text);
-        self.selection = Selection::empty(min + text.len());
+        let min = self.state.selection.min();
+        let max = self.state.selection.max();
+        self.state.text.replace_range(min..max, text);
+        self.state.selection = Selection::empty(min + text.len());
     }
 
     /// Sets cursor position.
+    // TODO move to EditState
     pub fn set_cursor(&mut self, pos: usize) {
-        if self.selection.is_empty() && self.selection.end == pos {
+        if self.state.selection.is_empty() && self.state.selection.end == pos {
             return;
         }
-        self.selection = Selection::empty(pos);
+        self.state.selection = Selection::empty(pos);
         // reset blink
     }
 
+    // TODO move to EditState
     pub fn set_selection_end(&mut self, pos: usize) {
-        if self.selection.end == pos {
+        if self.state.selection.end == pos {
             return;
         }
-        self.selection.end = pos;
+        self.state.selection.end = pos;
         // reset blink
     }
 
+    // TODO move to EditState
     pub fn select_all(&mut self) {
-        self.selection.start = 0;
-        self.selection.end = self.text.len();
+        self.state.selection.start = 0;
+        self.state.selection.end = self.state.text.len();
     }
 
     fn position_to_text(&self, pos: Point) -> usize {
@@ -188,11 +223,11 @@ impl TextEdit {
     }
 }
 
-impl Widget for TextEdit {
+impl WidgetDelegate for TextEdit {
     fn layout(
         &mut self,
         _ctx: &mut LayoutCtx,
-        _children: &mut [Node],
+        _children: &mut [Widget],
         constraints: &BoxConstraints,
         env: &Environment,
     ) -> Measurements {
@@ -211,7 +246,7 @@ impl Widget for TextEdit {
             size.height - padding.vertical(),
         );
 
-        let text_layout = TextLayout::new(&self.text, &self.text_format, content_size)
+        let text_layout = TextLayout::new(&self.state.text, &self.text_format, content_size)
             .expect("could not create TextLayout");
 
         let content_offset = Offset::new(padding.left, padding.top);
@@ -231,7 +266,7 @@ impl Widget for TextEdit {
     fn paint(
         &mut self,
         ctx: &mut PaintCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         bounds: Rect,
         env: &Environment,
     ) {
@@ -259,18 +294,21 @@ impl Widget for TextEdit {
 
         // text color
         text_layout.set_drawing_effect(&text_brush, ..);
-        if !self.selection.is_empty() {
+        if !self.state.selection.is_empty() {
             // FIXME slightly changes the layout when the selection straddles a kerning pair?
             text_layout.set_drawing_effect(
                 &selected_text_brush,
-                self.selection.min()..self.selection.max(),
+                self.state.selection.min()..self.state.selection.max(),
             );
         }
 
         // selection highlight
-        if !self.selection.is_empty() {
+        if !self.state.selection.is_empty() {
             let selected_areas = text_layout
-                .hit_test_text_range(self.selection.min()..self.selection.max(), &bounds.origin)
+                .hit_test_text_range(
+                    self.state.selection.min()..self.state.selection.max(),
+                    &bounds.origin,
+                )
                 .unwrap();
             for sa in selected_areas {
                 ctx.fill_rectangle(sa.bounds.round_out(), &selected_bg_brush);
@@ -288,7 +326,7 @@ impl Widget for TextEdit {
         // caret
         if ctx.is_focused() {
             let caret_hit_test = text_layout
-                .hit_test_text_position(self.selection.end)
+                .hit_test_text_position(self.state.selection.end)
                 .unwrap();
 
             //dbg!(caret_hit_test);
@@ -304,7 +342,7 @@ impl Widget for TextEdit {
         ctx.restore();
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Node], event: &Event) {
+    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {
         match event {
             Event::FocusGained => {
                 trace!("text edit: focus gained");
@@ -312,8 +350,9 @@ impl Widget for TextEdit {
             }
             Event::FocusLost => {
                 trace!("text edit: focus lost");
-                let pos = self.selection.end;
+                let pos = self.state.selection.end;
                 self.set_cursor(pos);
+                ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                 ctx.request_redraw();
             }
             Event::Pointer(p) => {
@@ -323,8 +362,10 @@ impl Widget for TextEdit {
                         if p.repeat_count == 2 {
                             // double-click selects all
                             self.select_all();
+                            ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                         } else {
                             self.set_cursor(pos);
+                            ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                         }
                         ctx.request_redraw();
                         ctx.request_focus();
@@ -335,7 +376,7 @@ impl Widget for TextEdit {
                         if ctx.is_capturing_pointer() {
                             let pos = self.position_to_text(p.position);
                             self.set_selection_end(pos);
-                            trace!(?self.selection, "text selection changed");
+                            ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                             ctx.request_redraw();
                         }
                     }
@@ -349,28 +390,32 @@ impl Widget for TextEdit {
                 KeyState::Down => match k.key {
                     keyboard_types::Key::Backspace => {
                         trace!("text edit: backspace");
-                        if self.selection.is_empty() {
+                        if self.state.selection.is_empty() {
                             self.move_cursor(Movement::Left, true);
                         }
                         self.insert("");
-                        ctx.emit_action(TextEditAction::TextChanged(self.text.clone()));
+                        ctx.emit_action(TextEditAction::TextChanged(self.state.text.clone()));
+                        ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                         ctx.request_relayout();
                     }
                     keyboard_types::Key::Delete => {
                         trace!("text edit: delete");
-                        if self.selection.is_empty() {
+                        if self.state.selection.is_empty() {
                             self.move_cursor(Movement::Right, true);
                         }
                         self.insert("");
-                        ctx.emit_action(TextEditAction::TextChanged(self.text.clone()));
+                        ctx.emit_action(TextEditAction::TextChanged(self.state.text.clone()));
+                        ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                         ctx.request_relayout();
                     }
                     keyboard_types::Key::ArrowLeft => {
                         self.move_cursor(Movement::Left, k.modifiers.contains(Modifiers::SHIFT));
+                        ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                         ctx.request_redraw();
                     }
                     keyboard_types::Key::ArrowRight => {
                         self.move_cursor(Movement::Right, k.modifiers.contains(Modifiers::SHIFT));
+                        ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                         ctx.request_redraw();
                     }
                     keyboard_types::Key::Character(ref c) => {
@@ -378,7 +423,8 @@ impl Widget for TextEdit {
                         //trace!("insert {:?}", input.character);
                         trace!("text edit: character {}", c);
                         self.insert(&c);
-                        ctx.emit_action(TextEditAction::TextChanged(self.text.clone()));
+                        ctx.emit_action(TextEditAction::TextChanged(self.state.text.clone()));
+                        ctx.emit_action(TextEditAction::SelectionChanged(self.state.selection));
                         ctx.request_relayout();
                     }
                     _ => {}
@@ -392,50 +438,48 @@ impl Widget for TextEdit {
     }
 }
 
-struct EditState {
-    text: String,
-    selection: Selection,
-}
-
-impl EditState {
-    pub fn new(text: String) -> EditState {
-        EditState {
-            text,
-            selection: Default::default(),
-        }
-    }
-
-    pub fn set_text(&mut self, text: String) {
-        self.text = text;
-        self.selection = Default::default();
-    }
-}
-
 /// Describes changes or events that happened on a text edit widget.
 #[derive(Clone)]
 pub struct TextEditResult(Option<TextEditAction>);
 
 impl TextEditResult {
     /// Calls the specified closure if the edited text has changed.
-    pub fn on_text_changed(&self, f: impl FnOnce(&str)) {
+    pub fn on_text_changed(self, f: impl FnOnce(&str)) -> Self {
         match &self.0 {
             Some(TextEditAction::TextChanged(str)) => f(str),
             _ => {}
         }
+        self
     }
 
     /// Calls the specified closure if the current selection has changed.
-    pub fn on_selection_changed(&self, f: impl FnOnce(&Selection)) {
+    pub fn on_selection_changed(self, f: impl FnOnce(&Selection)) -> Self {
         match &self.0 {
             Some(TextEditAction::SelectionChanged(s)) => f(s),
             _ => {}
         }
+        self
     }
+}
+
+// the main widget is a text_line_edit_state, which shows an EditState value
+// when the text changes, the selection s
+pub fn text_line_edit_state(cx: &mut CompositionCtx, state: &TextEditState) -> TextEditResult {
+    cx.enter(0);
+    let action = cx.emit_node(
+        |cx| TextEdit::new(state.clone()),
+        |cx, text_edit| {
+            text_edit.set_state(state.clone());
+        },
+        |_| {},
+    );
+    cx.exit();
+    TextEditResult(action.cast())
 }
 
 /// Displays a single-line text editor widget.
 ///
-/// TODO generalites (selection state, cursor, etc.)
+/// TODO generalities (selection state, cursor, etc.)
 ///
 /// The text appearance is controlled by the following environment variables: TODO.
 ///
@@ -447,13 +491,14 @@ impl TextEditResult {
 ///
 pub fn text_line_edit(cx: &mut CompositionCtx, text: &str) -> TextEditResult {
     cx.enter(0);
-    let action = cx.emit_node(
-        |cx| TextEdit::new(text.clone()),
-        |cx, text_edit| {
-            text_edit.set_text(text.clone());
+    let r = cx.with_state(
+        || TextEditState::new(text.to_string()),
+        |cx, state| {
+            state.set_text(text.to_string());
+            text_line_edit_state(cx, state)
+                .on_selection_changed(|selection| state.set_selection(*selection))
         },
-        |_| {},
     );
     cx.exit();
-    TextEditResult(action.cast())
+    r
 }

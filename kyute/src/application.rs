@@ -3,10 +3,17 @@
 //! Provides the `run_application` function that opens the main window and translates the incoming
 //! events from winit into the events expected by a kyute [`NodeTree`](crate::node::NodeTree).
 
-use crate::{composition, composition::CompositionCtx, core::{Dummy, EventCtx, EventTarget, Node, NodeId, Widget, WindowPaintCtx}, event::{
-    CompositionEvent, Event, InputState, KeyboardEvent, Modifiers, PointerButton,
-    PointerButtons, PointerEvent, PointerEventKind, PointerState,
-}, BoxConstraints, LayoutCtx, PaintCtx, PhysicalPoint, PhysicalSize, Point, RepaintRequest, Environment};
+use crate::{
+    composition,
+    composition::CompositionCtx,
+    core::{Dummy, EventCtx, EventTarget, Widget, NodeId, WidgetDelegate, WindowPaintCtx},
+    event::{
+        CompositionEvent, Event, InputState, KeyboardEvent, Modifiers, PointerButton,
+        PointerButtons, PointerEvent, PointerEventKind, PointerState,
+    },
+    BoxConstraints, Environment, CallKey, LayoutCtx, PaintCtx, PhysicalPoint, PhysicalSize, Point,
+    RepaintRequest,
+};
 use keyboard_types::KeyState;
 use kyute_shell::{
     platform::Platform,
@@ -18,6 +25,7 @@ use kyute_shell::{
     },
 };
 use std::{
+    any::Any,
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
     mem,
@@ -29,6 +37,11 @@ struct PendingEvent {
     source: Option<NodeId>,
     target: EventTarget,
     event: Event,
+}
+
+struct PendingAction {
+    node: NodeId,
+    payload: Box<dyn Any>,
 }
 
 // The internal event loop is managed by winit, so there will always be a `Window` object somewhere.
@@ -43,6 +56,8 @@ pub struct AppCtx {
     pub(crate) windows: HashMap<WindowId, NodeId>,
     /// Events waiting to be delivered
     pending_events: Vec<PendingEvent>,
+    /// Actions emitted by widgets waiting to be processed.
+    pending_actions: Vec<PendingAction>,
     needs_relayout: bool,
     needs_recomposition: bool,
     needs_full_repaint: bool,
@@ -53,6 +68,7 @@ impl AppCtx {
         AppCtx {
             windows: HashMap::new(),
             pending_events: vec![],
+            pending_actions: vec![],
             needs_relayout: false,
             needs_recomposition: false,
             needs_full_repaint: false,
@@ -76,6 +92,10 @@ impl AppCtx {
         self.windows.get(&window_id).cloned()
     }
 
+    pub(crate) fn post_action(&mut self, node: NodeId, payload: Box<dyn Any>) {
+        self.pending_actions.push(PendingAction { node, payload })
+    }
+
     pub fn post_event(&mut self, source: Option<NodeId>, target: EventTarget, event: Event) {
         self.pending_events.push(PendingEvent {
             source,
@@ -96,7 +116,7 @@ impl AppCtx {
 struct RunLoop {
     app_ctx: AppCtx,
     composed_once: bool,
-    root_node: Node,
+    root_node: Widget,
     root_fn: fn(&mut CompositionCtx),
 }
 
@@ -174,8 +194,28 @@ impl RunLoop {
 
     fn recompose(&mut self, event_loop: &EventLoopWindowTarget<()>) {
         let _span = trace_span!("recompose").entered();
-        self.root_node
-            .recompose(&mut self.app_ctx, event_loop, Environment::new(), self.root_fn);
+        self.root_node.recompose(
+            &mut self.app_ctx,
+            event_loop,
+            Environment::new(),
+            self.root_fn,
+        );
+    }
+
+    fn recompose_on_action(
+        &mut self,
+        event_loop: &EventLoopWindowTarget<()>,
+        node: NodeId,
+        action: Box<dyn Any>,
+    ) {
+        self.root_node.recompose_on_action(
+            &mut self.app_ctx,
+            event_loop,
+            Environment::new(),
+            node,
+            action,
+            self.root_fn,
+        );
     }
 
     fn handle_event(
@@ -210,7 +250,17 @@ impl RunLoop {
                     }
                 }
 
+                // --- handle actions ---
+                {
+                    let pending_actions = mem::take(&mut self.app_ctx.pending_actions);
+                    for action in pending_actions {
+                        self.recompose_on_action(elwt, action.node, action.payload);
+                    }
+                }
+
                 // --- handle recomposition requests ---
+                // TODO: eventually this could be removed, since recompositions are a result of actions
+                // (or more accurately, actions that result in a state change)
                 {
                     if self.app_ctx.needs_recomposition {
                         self.recompose(elwt);
@@ -250,7 +300,7 @@ pub fn run(root_fn: fn(&mut CompositionCtx)) {
     let mut run_loop = RunLoop {
         app_ctx: AppCtx::new(),
         composed_once: false,
-        root_node: Node::dummy(),
+        root_node: Widget::dummy(),
         root_fn,
     };
 

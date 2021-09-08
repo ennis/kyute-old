@@ -28,7 +28,7 @@ impl PathGeometry {
 
         // build geometry
         unsafe {
-            let factory = &platform.d2d_factory;
+            let factory = &platform.0.d2d_factory;
             let mut path_geometry = None;
             let path_geometry = factory
                 .CreatePathGeometry(&mut path_geometry)

@@ -19,12 +19,16 @@ use crate::bindings::Windows::Win32::{
 use once_cell::sync::OnceCell;
 use palette::encoding::pixel::RawPixel;
 use std::{
+    cell::RefCell,
     ffi::OsString,
     mem::MaybeUninit,
     ops::Deref,
     os::raw::c_void,
     ptr,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use windows::Interface;
@@ -82,7 +86,7 @@ send_com_ptr_wrapper! { D2D1DeviceContext(ID2D1DeviceContext) }
 /// to the screen.
 ///
 // all of this must be either directly Sync, or wrapped in a mutex, or wrapped in a main-thread-only wrapper.
-pub struct Platform {
+pub(crate) struct PlatformImpl {
     pub(crate) d3d11_device: D3D11Device, // thread safe
     //pub(crate) d3d12_device: D3D12Device,  // thread safe
     //pub(crate) d3d11_device_context: Mutex<ComPtr<ID3D11DeviceContext>>,   // not thread safe (should be thread-local)
@@ -91,19 +95,51 @@ pub struct Platform {
     pub(crate) dwrite_factory: DWriteFactory,
     pub(crate) d2d_device: D2D1Device,
     // FIXME: it's far too easy to clone the ID2D11DeviceContext accidentally and use it in a thread-unsafe way: maybe create it on-the-fly instead?
-    pub(crate) d2d_device_context: Mutex<D2D1DeviceContext>,
+    pub(crate) d2d_device_context: D2D1DeviceContext,
     pub(crate) wic_factory: WICImagingFactory2,
 }
 
-/// Platform singleton.
-static PLATFORM: OnceCell<Platform> = OnceCell::new();
+#[derive(Clone)]
+pub struct Platform(pub(crate) Arc<PlatformImpl>);
+
+thread_local! {
+    /// Platform singleton. Only accessible from the main thread, hence the `thread_local`.
+
+    // NOTE: we previously used `OnceCell` so that we could get a `&'static Platform` that lived for
+    // the duration of the application, but the destructor wasn't called. This has consequences on
+    // windows because the DirectX debug layers trigger panics when objects are leaked.
+    // Now we use shared ownership instead, and automatically release this global reference when
+    // `run` returns.
+    static PLATFORM: RefCell<Option<Platform>> = RefCell::new(None);
+}
+
+/// Global flag that tells whether there's an active `Platform` object in `PLATFORM`.
+static PLATFORM_CREATED: AtomicBool = AtomicBool::new(false);
 
 impl Platform {
-    /// Initializes platform-specific application state.
+    /// Initializes the application platform.
     ///
-    /// The platform instance will be tied to this thread (the "main thread").
-    pub fn init() -> &'static Platform {
-        // --- Create the graal context (implying a vulkan instance and device)
+    /// The platform will be tied to this thread (the "main thread").
+    pub fn new() -> anyhow::Result<Platform> {
+        // check that we don't already have an active platform, and acquire the global flag
+        PLATFORM_CREATED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| anyhow::anyhow!("an application platform has already been created."))?;
+
+        // actually create the platform
+        let platform = Self::new_impl();
+
+        if let Err(e) = platform {
+            // if creation failed, don't forget to release the global flag
+            PLATFORM_CREATED.store(false, Ordering::Release);
+            return Err(e.context("failed to create application platform"));
+        }
+
+        platform
+    }
+
+    fn new_impl() -> anyhow::Result<Platform> {
+        // --- TODO Create the graal context (implying a vulkan instance and device)
 
         // FIXME technically we need the target surface so we can pick a device that can
         // render to it. However, on most systems, all available devices can render to window surfaces,
@@ -140,9 +176,11 @@ impl Platform {
             let name = OsString::from_wide(&desc.Description[..name_len])
                 .to_string_lossy()
                 .into_owned();
-            eprintln!(
-                "DXGI adapter info: name={}, LUID={:08x}{:08x}",
-                name, desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart,
+            tracing::info!(
+                "DXGI adapter: name={}, LUID={:08x}{:08x}",
+                name,
+                desc.AdapterLuid.HighPart,
+                desc.AdapterLuid.LowPart,
             );
         }
 
@@ -181,10 +219,9 @@ impl Platform {
                 // ppImmediateContext:
                 &mut _d3d11_device_context,
             )
-            .ok()
-            .expect("D3D11CreateDevice failed");
+            .ok()?;
 
-            dbg!(feature_level);
+            tracing::info!("Direct3D feature level: {}", feature_level.0);
 
             (
                 D3D11Device(d3d11_device.unwrap().cast::<ID3D11Device5>().unwrap()),
@@ -279,28 +316,31 @@ impl Platform {
             WICImagingFactory2(wic)
         };
 
-        PLATFORM
-            .set(Platform {
-                //d3d12_device,
-                d3d11_device,
-                dxgi_factory,
-                dwrite_factory,
-                d2d_factory,
-                d2d_device,
-                d2d_device_context: Mutex::new(d2d_device_context),
-                wic_factory,
-            })
-            .ok()
-            .unwrap();
+        let platform_impl = PlatformImpl {
+            //d3d12_device,
+            d3d11_device,
+            dxgi_factory,
+            dwrite_factory,
+            d2d_factory,
+            d2d_device,
+            d2d_device_context,
+            wic_factory,
+        };
 
-        PLATFORM.get().unwrap()
+        let platform = Platform(Arc::new(platform_impl));
+        Ok(platform)
     }
 
     /// Returns the global application object that was created by a call to `init`.
-    pub fn instance() -> &'static Platform {
-        PLATFORM
-            .get()
-            .expect("the platform instance was not initialized")
+    ///
+    /// # Panics
+    ///
+    /// Panics of no platform is active, or if called outside of the main thread, which is the thread
+    /// that called `Platform::new`.
+    pub fn instance() -> Platform {
+        PLATFORM.with(|p| p.borrow().clone()).expect(
+            "either the platform instance was not initialized, or not calling from the main thread",
+        )
     }
 
     /// Returns the system double click time in milliseconds.

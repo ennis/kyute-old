@@ -23,7 +23,7 @@ pub enum ImagingError {
 
 fn load_bitmap_from_file_internal(draw_ctx: &DrawContext, path: &Path) -> Result<Bitmap> {
     let platform = Platform::instance();
-    let wic = &platform.wic_factory;
+    let wic = &platform.0.wic_factory;
     unsafe {
         let mut decoder = None;
         let decoder = wic

@@ -1,11 +1,11 @@
 //! Sliders provide a way to make a value vary linearly between two bounds by dragging a knob along
 //! a line.
 use crate::{
-    core::Node,
+    core::Widget,
     event::{Event, PointerEventKind},
     style::State,
     theme, BoxConstraints, CompositionCtx, Environment, EventCtx, LayoutCtx, Measurements,
-    PaintCtx, Point, Rect, SideOffsets, Size, Widget,
+    PaintCtx, Point, Rect, SideOffsets, Size, WidgetDelegate,
 };
 use kyute_shell::drawing::{Brush, Color};
 use std::any::Any;
@@ -108,12 +108,12 @@ impl Slider {
     }
 }
 
-impl Widget for Slider {
+impl WidgetDelegate for Slider {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Node], event: &Event) {
+    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {
         match event {
             Event::Pointer(p) => match p.kind {
                 PointerEventKind::PointerOver | PointerEventKind::PointerOut => {
@@ -140,7 +140,7 @@ impl Widget for Slider {
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         constraints: &BoxConstraints,
         _env: &Environment,
     ) -> Measurements {
@@ -178,7 +178,7 @@ impl Widget for Slider {
     fn paint(
         &mut self,
         ctx: &mut PaintCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         bounds: Rect,
         env: &Environment,
     ) {
@@ -213,40 +213,17 @@ impl Widget for Slider {
     }
 }
 
-/*/// A slider.
-pub fn slider(cx: &mut CompositionCtx, min: f64, max: f64, value: &mut f64) {
-    cx.enter(0);
-    let v = *value;
-    cx.with_state(
-        || v,
-        |cx, prev_val| {
-            let changed_externally = prev_val != value;
-            cx.emit_node(
-                |cx| Slider::new(min, max, v),
-                |cx, slider| {
-                    if changed_externally {
-                        slider.set_value(v);
-                    } else {
-                        *value = slider.value;
-                    }
-                },
-                |_| {},
-            );
-            *prev_val = *value;
-        },
-    );
-    cx.exit();
-}*/
 
 #[derive(Copy, Clone, Debug)]
 pub struct SliderResult(Option<SliderAction>);
 
 impl SliderResult {
-    pub fn on_value_change(&self, f: impl FnOnce(f64)) {
-        match self.0 {
+    pub fn on_value_change(self, f: impl FnOnce(f64)) -> Self {
+        match &self.0 {
             None => {}
-            Some(SliderAction::ValueChanged(value)) => f(value),
+            Some(SliderAction::ValueChanged(value)) => f(*value),
         }
+        self
     }
 }
 

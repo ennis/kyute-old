@@ -7,6 +7,10 @@ use kyute_shell::{drawing::Color, platform::Platform};
 fn gui(cx: &mut CompositionCtx) {
     use kyute::widget as w;
 
+    // Using functions directly is a bit impractical in rust, because of the lack of optional parameters
+
+    // returns a MutableState<f64>
+
     cx.with_environment(get_default_application_style(), |cx| {
         cx.with_state(
             || 0.0,
@@ -16,33 +20,102 @@ fn gui(cx: &mut CompositionCtx) {
                         w::button(cx, &format!("click me: {}", counter));
                         w::button(cx, &format!("click me again: {}", counter))
                             .on_click(|| *counter += 42.0);
-                        w::slider(cx, 0.0, 100.0, *counter).on_value_change(|x| *counter = x);
+                        w::slider(cx, 0.0, 100.0, *counter)
+                            .on_value_change(|v| *counter = v);
 
                         cx.with_state(String::new, |cx, str| {
                             w::text_line_edit(cx, str)
-                                .on_text_changed(|new_str| *str = new_str.to_string());
-
-                            // there are two copies of the string:
-                            // - the one stored by the user as part of their app state: "user state"
-                            // - the internal string stored by the LineEdit: "internal state"
-
-                            // 1. LineEdit is created with a string "A"
-                            // 2. a character is inserted, the internal state is set to "AB"
-                            // 3. this triggers recomposition: text_line_edit is called again,
-                            //    with the user string, which still contains "A"
-                            // 4. since user state ("A") != internal state ("AB"), internal state is updated to "A" => the internal selection is cleared
-                            // 5. the "TextChanged" action is dequeued: user state is updated to "AB"
-                            //
-                            // Solution: in emit_node, don't update
-
+                                .on_text_changed(|s| *str = s.to_string());
                             w::text(cx, str);
                         });
                     });
                 });
-            },
+            }
         );
     });
+
+
+    w::EnvWrapper::new(get_default_application_style())
+        .contents(
+            w::StateWrapper::new::<f64>(|| 0.0)
+                .contents()
+
+        );
 }
+
+/*
+// three ways:
+// - raw rust code
+// - macro-assisted
+// - full DSL
+#[composable]
+fn gui2(state: &mut State) {
+    use kyute::widget as w;
+
+    view!{
+        w::window(.title = "Kyute main window")
+        {
+            // let and let mut bindings (internal state)
+            let mut counter = 0.0;
+            // for loops
+
+            for i in 0..10 {
+                w::text(.text = format!("label #{}", i))
+                + w::padding(0.5)
+                + w::align(baseline
+            }
+
+            w::vbox {
+                w::button(&format!("click me: {}", counter));
+                w::button(&format!("click me again: {}", counter)).on_click(|| *counter += 42.0);
+            }
+        }
+    }
+
+    with_environment!(get_default_application_style(),
+        {
+            #[state] let mut counter = 0.0;
+            w::window("Kyute main window") {
+                w::vbox {
+                    w::button(&format!("click me: {}", counter));
+                    w::button(&format!("click me again: {}", counter)).on_click(|| *counter += 42.0);
+                }
+            }
+        }
+    );
+}*/
+
+/*// key difference with druid: we have a concrete reference to the node,
+// and access stuff from it, instead of "building a function that will take a node as an argument"
+// (roughly), using lenses and stuff.
+//
+// However, we do need to pass the CompositionCtx around, which is annoying.
+fn node_row(cx: &mut CompositionCtx, depth: u32, node: &mut Node) {
+
+    w::vbox(cx, |cx| {
+        // name row
+        w::hbox(cx, |cx| {
+            w::label(cx, "name");
+            w::text_box(cx, &node.name).on_text_changed(Action::RenameNode);  // RenameNode is handled by the function above
+        });
+
+        // button to add a child node
+        w::button(cx, "Add child")
+            .on_click(|| {
+                let mut new_node = node.clone();
+                new_node.children.push(Node::new());
+                new_node
+            });
+
+
+        // children
+        for n in node.children.iter_mut() {
+            node_row(cx, depth + 1, n);
+        }
+    });
+}*/
+
+
 
 fn main() {
     Platform::init();

@@ -1,5 +1,5 @@
 use crate::{core::{
-    EventCtx, FocusAction, LayoutCtx, Node, PaintCtx, RepaintRequest, Widget,
+    EventCtx, FocusAction, LayoutCtx, Widget, PaintCtx, RepaintRequest, WidgetDelegate,
     WindowPaintCtx,
 }, event::{Event, InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind}, layout::{BoxConstraints, Measurements}, NodeId, PhysicalSize, Point, Rect, Size, Environment};
 use keyboard_types::KeyState;
@@ -74,7 +74,7 @@ impl WindowWidget {
     }*/
 }
 
-impl Widget for WindowWidget {
+impl WidgetDelegate for WindowWidget {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
@@ -88,14 +88,14 @@ impl Widget for WindowWidget {
     ) {
     }*/
 
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Node], event: &Event) {
+    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {
         // this node doesn't receive processed events
     }
 
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         constraints: &BoxConstraints,
         _env: &Environment,
     ) -> Measurements {
@@ -108,7 +108,7 @@ impl Widget for WindowWidget {
         Measurements::default()
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect,
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Widget], bounds: Rect,
              _env: &Environment) {
         for c in children.iter_mut() {
             c.paint(ctx);

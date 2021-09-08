@@ -154,9 +154,7 @@ impl TextFormat {
 
     /// Returns the font size in DIPs.
     pub fn font_size(&self) -> f32 {
-        unsafe {
-            self.0.GetFontSize()
-        }
+        unsafe { self.0.GetFontSize() }
     }
 }
 
@@ -196,6 +194,7 @@ impl<'a> TextFormatBuilder<'a> {
         unsafe {
             let mut text_format = None;
             let text_format = platform
+                .0
                 .dwrite_factory
                 .CreateTextFormat(
                     self.family,
@@ -345,6 +344,7 @@ impl TextLayout {
         unsafe {
             let mut text_layout = None;
             let text_layout = platform
+                .0
                 .dwrite_factory
                 .CreateTextLayout(
                     PWSTR(wtext.as_mut_ptr()), // oversight?

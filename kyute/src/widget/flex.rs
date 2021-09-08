@@ -1,4 +1,4 @@
-use crate::{core::{EventCtx, LayoutCtx, Node, PaintCtx, Widget}, event::Event, layout::{BoxConstraints, Measurements}, CompositionCtx, Offset, Rect, Size, Environment};
+use crate::{core::{EventCtx, LayoutCtx, Widget, PaintCtx, WidgetDelegate}, event::Event, layout::{BoxConstraints, Measurements}, CompositionCtx, Offset, Rect, Size, Environment};
 use tracing::trace;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -65,7 +65,7 @@ impl Flex {
     }
 }
 
-impl Widget for Flex {
+impl WidgetDelegate for Flex {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
@@ -73,7 +73,7 @@ impl Widget for Flex {
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         constraints: &BoxConstraints,
         _env: &Environment
     ) -> Measurements {
@@ -121,7 +121,7 @@ impl Widget for Flex {
         Measurements::new(size)
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect, _env: &Environment) {
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Widget], bounds: Rect, _env: &Environment) {
         for c in children.iter_mut() {
             c.paint(ctx);
         }

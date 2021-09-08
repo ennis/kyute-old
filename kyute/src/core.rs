@@ -8,7 +8,7 @@ use crate::{
     layout::{BoxConstraints, Measurements},
     region::Region,
     util::Counter,
-    Environment, Offset, PhysicalSize, Point, Rect, Size,
+    Environment, CallKey, Offset, PhysicalSize, Point, Rect, Size,
 };
 use keyboard_types::{KeyState, KeyboardEvent};
 use kyute_shell::{
@@ -498,8 +498,8 @@ impl WindowState {
     fn process_window_event(
         &mut self,
         app_ctx: &mut AppCtx,
-        widget: &mut dyn Widget,
-        children: &mut [Node],
+        widget: &mut dyn WidgetDelegate,
+        children: &mut [Widget],
         window_event: &winit::event::WindowEvent,
     ) {
         let _span = trace_span!("process_window_event", ?window_event).entered();
@@ -793,8 +793,8 @@ impl WindowState {
     fn paint(
         &mut self,
         node_id: NodeId,
-        widget: &mut dyn Widget,
-        children: &mut [Node],
+        widget: &mut dyn WidgetDelegate,
+        children: &mut [Widget],
         env: &Environment,
     ) {
         {
@@ -844,14 +844,12 @@ pub struct EventCtx<'a> {
     window_bounds: Rect,
     /// Event handled
     handled: bool,
-    pending_actions: &'a mut Vec<Box<dyn Any>>,
 }
 
 impl<'a> EventCtx<'a> {
     fn new(
         app_ctx: &'a mut AppCtx,
         window_state: Option<&'a mut WindowState>,
-        pending_actions: &'a mut Vec<Box<dyn Any>>,
         node_id: NodeId,
     ) -> EventCtx<'a> {
         EventCtx {
@@ -861,12 +859,11 @@ impl<'a> EventCtx<'a> {
             bounds: Default::default(),
             window_bounds: Default::default(),
             handled: false,
-            pending_actions,
         }
     }
 
     pub fn emit_action<T: Any>(&mut self, action: T) {
-        self.pending_actions.push(Box::new(action));
+        self.app_ctx.post_action(self.node_id, Box::new(action));
         self.request_recomposition();
     }
 
@@ -934,10 +931,15 @@ impl<'a> EventCtx<'a> {
             if window_state.focus != Some(self.node_id) {
                 // changing focus
                 if let Some(old_focus) = window_state.focus {
-                    self.app_ctx.post_event(None, EventTarget::Direct(old_focus), Event::FocusLost);
+                    self.app_ctx
+                        .post_event(None, EventTarget::Direct(old_focus), Event::FocusLost);
                 }
                 window_state.focus = Some(self.node_id);
-                self.app_ctx.post_event(None, EventTarget::Direct(self.node_id), Event::FocusGained);
+                self.app_ctx.post_event(
+                    None,
+                    EventTarget::Direct(self.node_id),
+                    Event::FocusGained,
+                );
             }
         } else {
             warn!(node_id=?self.node_id, "request_focus: node does not belong to a window and doesn't receive pointer events");
@@ -976,30 +978,32 @@ enum EventPropagationMode {
     Single,
 }
 
-/// Trait implemented by widgets.
-pub trait Widget: Any {
+/// Trait that defines the behavior of a widget.
+pub trait WidgetDelegate: Any {
     /// Implement to give a debug name to your widget. Used only for debugging.
     fn debug_name(&self) -> &str {
-        "Widget"
+        "WidgetDelegate"
     }
 
     /// Handles events and pass them down to children.
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Node], event: &Event) {}
+    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {}
 
-    /// Called to measure this widget and layout the children of this widget (`ctx.children_mut()`).
+    /// Called to measure this widget and layout the children of this widget.
+    /// TODO: not having to pass the child nodes here would simplify the implementation
+    /// of the composition table.
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         constraints: &BoxConstraints,
         env: &Environment,
     ) -> Measurements;
 
     /// Called to paint the widget
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Node], bounds: Rect, env: &Environment);
+    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Widget], bounds: Rect, env: &Environment);
 
     /// Called only for native window widgets.
-    fn window_paint(&mut self, _ctx: &mut WindowPaintCtx, _children: &mut [Node]) {}
+    fn window_paint(&mut self, _ctx: &mut WindowPaintCtx, _children: &mut [Widget]) {}
 
     /// Returns `true` if the widget is fully opaque when drawn, `false` if it is semitransparent.
     /// This is mostly used as an optimization: if a semitransparent widget needs to be redrawn,
@@ -1009,13 +1013,13 @@ pub trait Widget: Any {
     }
 }
 
-impl<W: Widget + ?Sized> Widget for Box<W> {
+impl<W: WidgetDelegate + ?Sized> WidgetDelegate for Box<W> {
     fn debug_name(&self) -> &str {
-        Widget::debug_name(&**self)
+        WidgetDelegate::debug_name(&**self)
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Node], event: &Event) {
-        Widget::event(&mut **self, ctx, children, event)
+    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {
+        WidgetDelegate::event(&mut **self, ctx, children, event)
     }
 
     /*fn window_event(
@@ -1030,31 +1034,32 @@ impl<W: Widget + ?Sized> Widget for Box<W> {
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         constraints: &BoxConstraints,
         env: &Environment,
     ) -> Measurements {
-        Widget::layout(&mut **self, ctx, children, constraints, env)
+        WidgetDelegate::layout(&mut **self, ctx, children, constraints, env)
     }
 
     fn paint(
         &mut self,
         ctx: &mut PaintCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         bounds: Rect,
         env: &Environment,
     ) {
-        Widget::paint(&mut **self, ctx, children, bounds, env)
+        WidgetDelegate::paint(&mut **self, ctx, children, bounds, env)
     }
 
-    fn window_paint(&mut self, ctx: &mut WindowPaintCtx, children: &mut [Node]) {
-        Widget::window_paint(&mut **self, ctx, children)
+    fn window_paint(&mut self, ctx: &mut WindowPaintCtx, children: &mut [Widget]) {
+        WidgetDelegate::window_paint(&mut **self, ctx, children)
     }
 }
 
-/// A container for `Widget`s and their child `Node`s.
-pub struct Node<W = Box<dyn Widget>> {
+/// Widget, with associated child widgets and delegate.
+pub struct Widget<W = Box<dyn WidgetDelegate>> {
     pub(crate) id: NodeId,
+    pub(crate) key: CallKey,
     /// Offset of the node relative to the parent
     pub(crate) offset: Offset,
     /// Layout of the node (size and baseline).
@@ -1066,28 +1071,43 @@ pub struct Node<W = Box<dyn Widget>> {
     /// ID of the parent window for this node.
     pub(crate) parent_window_id: Option<WindowId>,
     /// Child nodes.
-    pub(crate) children: Vec<Node>,
+    pub(crate) children: Vec<Widget>,
     /// A temporary value to store the index of this node during recomposition.
     pub(crate) child_index: usize,
     window_state: Option<Box<WindowState>>,
     /// This node's composition table.
     pub(crate) composition_table: Vec<CompositionSlot>,
     pub(crate) child_filter: Bloom<NodeId>,
-    pub(crate) pending_actions: Vec<Box<dyn Any>>,
     env: Environment,
 }
 
-impl Node {
-    pub fn dummy() -> Node {
+impl Widget {
+    pub fn dummy() -> Widget {
         unsafe {
-            Node::new(
+            Widget::new(
                 Box::new(Dummy),
                 NodeId::next(),
+                CallKey::from_caller(0),
                 None,
                 None,
                 Environment::new(),
             )
         }
+    }
+
+    pub(crate) fn key_path_to_child(&self, target: NodeId) -> Option<Vec<CallKey>> {
+        let mut path = Vec::new();
+        if !self.path_to_child(target, &mut path) {
+            return None;
+        }
+
+        let mut key_path = Vec::with_capacity(path.len());
+        let mut node = self;
+        for &i in path.iter() {
+            node = &node.children[i];
+            key_path.push(node.key);
+        }
+        Some(key_path)
     }
 }
 
@@ -1099,19 +1119,21 @@ pub enum EventTarget {
     Broadcast,
 }
 
-impl<W: Widget> Node<W> {
+impl<W: WidgetDelegate> Widget<W> {
     /// Creates a node with the specified ID.
     /// Safety: The ID must be unique. Use NodeId::new()
     pub unsafe fn new(
         widget: W,
         id: NodeId,
+        key: CallKey,
         parent_window_id: Option<WindowId>,
         window: Option<PlatformWindow>,
         env: Environment,
-    ) -> Node<W> {
+    ) -> Widget<W> {
         let window_state = window.map(|w| Box::new(WindowState::new(w)));
-        Node {
+        Widget {
             id,
+            key,
             offset: Default::default(),
             measurements: Default::default(),
             window_pos: Default::default(),
@@ -1122,13 +1144,16 @@ impl<W: Widget> Node<W> {
             window_state,
             composition_table: vec![],
             child_filter: Default::default(),
-            pending_actions: vec![],
             env,
         }
     }
 
+    pub fn debug_name(&self) -> &str {
+        self.widget.debug_name()
+    }
+
     /// Finds a child node with the specified ID.
-    pub fn find_child_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+    pub fn find_child_mut(&mut self, id: NodeId) -> Option<&mut Widget> {
         // query the bloom filter to see if this ID definitely does not belong to this node or its children
         if !self.child_filter.may_contain(&id) {
             return None;
@@ -1164,6 +1189,15 @@ impl<W: Widget> Node<W> {
         }
     }
 
+    /// Returns the path to the a target child node, as a sequence of child node indices.
+    ///
+    /// # Arguments
+    /// * `target` - target child node
+    /// * `result` - (output) the sequence of child indices leading to the node is appended in `result` if the node has been found,
+    /// otherwise its contents are left unchanged.
+    ///
+    /// # Return value
+    /// `true` if the target has been found (and the path has been appended to `result`), `false` otherwise.
     fn path_to_child(&self, target: NodeId, result: &mut Vec<usize>) -> bool {
         if self.id == target {
             return true;
@@ -1238,7 +1272,6 @@ impl<W: Widget> Node<W> {
                 bounds,
                 window_bounds,
                 handled,
-                pending_actions: &mut self.pending_actions,
             };
             self.widget
                 .event(&mut event_ctx, &mut self.children, &transformed_event);
@@ -1467,17 +1500,17 @@ impl Dummy {
     }
 }
 
-impl Widget for Dummy {
+impl WidgetDelegate for Dummy {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
 
-    fn event(&mut self, _ctx: &mut EventCtx, _children: &mut [Node], _event: &Event) {}
+    fn event(&mut self, _ctx: &mut EventCtx, _children: &mut [Widget], _event: &Event) {}
 
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Node],
+        children: &mut [Widget],
         constraints: &BoxConstraints,
         _env: &Environment,
     ) -> Measurements {
@@ -1490,7 +1523,7 @@ impl Widget for Dummy {
     fn paint(
         &mut self,
         ctx: &mut PaintCtx,
-        _children: &mut [Node],
+        _children: &mut [Widget],
         _bounds: Rect,
         _env: &Environment,
     ) {
