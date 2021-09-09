@@ -1,17 +1,27 @@
-use kyute::{composable, widget::Flex, Context, Data, Event, Measurements, Widget, WidgetDelegate, BoxConstraints, Environment, Rect, LayoutCtx, Layout, PaintCtx};
-use kyute_shell::platform::Platform;
+use kyute::{
+    composable,
+    widget::{Axis, Flex},
+    BoxConstraints, Context, Data, Environment, Event, Layout, LayoutCtx, Measurements, PaintCtx,
+    Rect, Widget, WidgetDelegate,
+};
+use kyute_shell::{platform::Platform};
 use std::sync::Arc;
-use kyute::widget::Axis;
+use kyute::widget::Button;
 
 struct EventCtx;
 
 struct Window;
 impl WidgetDelegate for Window {
-    fn layout(&self, ctx: &mut kyute::LayoutCtx, constraints: &BoxConstraints, env: &Environment) -> kyute::Layout {
+    fn layout(
+        &mut self,
+        ctx: &mut kyute::LayoutCtx,
+        constraints: BoxConstraints,
+        env: &Environment,
+    ) -> kyute::Layout {
         todo!()
     }
 
-    fn paint(&self, ctx: &mut kyute::PaintCtx, bounds: Rect, env: &Environment) {
+    fn paint(&self, ctx: &mut kyute::PaintCtx, layout: Layout, env: &Environment) {
         todo!()
     }
 }
@@ -35,30 +45,11 @@ fn vbox() -> Widget<Flex> {
     Widget::new(vbox)
 }
 
-#[derive(Copy, Clone, Debug)]
-struct Button;
-
-impl WidgetDelegate for Button {
-    fn layout(&self, ctx: &mut LayoutCtx, constraints: &BoxConstraints, env: &Environment) -> Layout {
-        todo!()
-    }
-
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
-        todo!()
-    }
-}
-
-impl Data for Button {
-    fn same(&self, other: &Self) -> bool {
-        true
-    }
-}
-
 #[composable(uncached)]
 fn button(label: Arc<str>) -> Widget<Button> {
     // a state entry is created within Context::cache, so this will be added as a dependency of the cache entry
     //let hovered = Context::cache((), |_| false);
-    Widget::new(Button)
+    Widget::new(Button::new(label.to_string()))
 }
 
 fn main() {

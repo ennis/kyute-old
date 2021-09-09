@@ -2,6 +2,7 @@
 mod button;
 //mod container;
 mod flex;
+mod text;
 //mod grid;
 //mod slider;
 //mod text;
@@ -9,6 +10,8 @@ mod flex;
 //mod window;
 
 pub use flex::{Axis, CrossAxisAlignment, Flex, MainAxisAlignment, MainAxisSize};
+pub use text::Text;
+pub use button::Button;
 
 /*pub use button::{button, ButtonResult};
 pub use container::container;

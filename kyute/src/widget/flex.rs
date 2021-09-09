@@ -78,9 +78,9 @@ impl Flex {
 
 impl WidgetDelegate for Flex {
     fn layout(
-        &self,
+        &mut self,
         ctx: &mut LayoutCtx,
-        constraints: &BoxConstraints,
+        constraints: BoxConstraints,
         env: &Environment,
     ) -> Layout {
         let item_layouts: Vec<Layout> = self
@@ -123,10 +123,10 @@ impl WidgetDelegate for Flex {
             Axis::Horizontal => Size::new(constraints.constrain_width(d), cross_axis_len),
         };
 
-        Layout::new(Measurements::new(size), positioned_items)
+        Layout::with_child_layouts(Measurements::new(size), positioned_items)
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+    fn paint(&self, ctx: &mut PaintCtx, layout: Layout, env: &Environment) {
         todo!()
     }
 }

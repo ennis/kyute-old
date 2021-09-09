@@ -1,14 +1,12 @@
 //! Text elements
-use crate::{
-    core::Widget, event::Event, BoxConstraints, CompositionCtx, EventCtx, LayoutCtx, Measurements,
-    PaintCtx, Point, Rect, WidgetDelegate,
-};
+use crate::{event::Event, BoxConstraints, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect, WidgetDelegate, Layout};
 use kyute_shell::{
     drawing::{Brush, Color, DrawTextOptions},
     text::{TextFormatBuilder, TextLayout},
 };
 use crate::env::Environment;
 
+#[derive(Clone)]
 pub struct Text {
     text: String,
     text_layout: Option<TextLayout>,
@@ -35,17 +33,16 @@ impl WidgetDelegate for Text {
         std::any::type_name::<Self>()
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event) {
         // nothing
     }
 
     fn layout(
         &mut self,
         _ctx: &mut LayoutCtx,
-        _children: &mut [Widget],
-        constraints: &BoxConstraints,
+        constraints: BoxConstraints,
         _env: &Environment
-    ) -> Measurements {
+    ) -> Layout {
         let font_name = "Consolas";
         let font_size = 12;
         let text_format = TextFormatBuilder::new()
@@ -65,12 +62,11 @@ impl WidgetDelegate for Text {
             .map(|m| m.baseline as f64);
 
         self.text_layout = Some(text_layout);
-
-        Measurements { size, baseline }
+        Layout::new(Measurements { size, baseline } )
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Widget], bounds: Rect, _env: &Environment) {
-        let text_brush = Brush::solid_color(ctx, Color::new(0.92, 0.92, 0.92, 1.0));
+    fn paint(&self, ctx: &mut PaintCtx, layout: Layout, _env: &Environment) {
+        /*let text_brush = Brush::solid_color(ctx, Color::new(0.92, 0.92, 0.92, 1.0));
 
         if let Some(ref text_layout) = self.text_layout {
             ctx.draw_text_layout(
@@ -81,20 +77,6 @@ impl WidgetDelegate for Text {
             )
         } else {
             tracing::warn!("text layout wasn't calculated before paint")
-        }
+        }*/
     }
-}
-
-/// Text element.
-// TODO font properties, alignment...
-pub fn text(cx: &mut CompositionCtx, text: &str) {
-    cx.enter(0);
-    cx.emit_node(
-        |cx| Text::new(text),
-        |cx, widget| {
-            widget.set_text(text);
-        },
-        |cx| {},
-    );
-    cx.exit();
 }

@@ -1,14 +1,66 @@
-use crate::{BoxConstraints, Context, Environment, Event, Measurements, Offset, Rect, Size};
+use crate::{BoxConstraints, Context, Environment, Event, Measurements, Offset, Point, Rect, Size};
 use kyute_macros::composable;
-use std::sync::{Arc, Mutex, Weak};
-use std::hash::{Hash, Hasher};
+use kyute_shell::drawing::DrawContext;
+use std::{
+    hash::{Hash, Hasher},
+    ops::{Deref, DerefMut},
+    sync::{Arc, Mutex, Weak},
+};
 
 /// Context passed to widgets during the layout pass.
 ///
 /// See [`Widget::layout`].
 pub struct LayoutCtx {}
 
-pub struct PaintCtx {}
+pub struct PaintCtx<'a> {
+    draw_ctx: &'a mut DrawContext,
+    window_bounds: Rect,
+}
+
+impl<'a> PaintCtx<'a> {
+    /*/// Returns the window bounds of the node
+    pub fn window_bounds(&self) -> Rect {
+        self.window_bounds
+    }*/
+
+    /// Returns the bounds of the node.
+    pub fn bounds(&self) -> Rect {
+        // FIXME: is the local origin always on the top-left corner?
+        Rect::new(Point::origin(), self.window_bounds.size)
+    }
+
+    /*/// Returns the size of the node.
+    pub fn size(&self) -> Size {
+        self.window_bounds.size
+    }
+
+    pub fn is_hovering(&self) -> bool {
+        self.hover
+    }
+
+    pub fn is_focused(&self) -> bool {
+        self.focus == Some(self.node_id)
+    }
+
+    pub fn is_capturing_pointer(&self) -> bool {
+        self.pointer_grab == Some(self.node_id)
+    }*/
+}
+
+// PaintCtx auto-derefs to a DrawContext
+impl<'a> Deref for PaintCtx<'a> {
+    type Target = DrawContext;
+
+    fn deref(&self) -> &Self::Target {
+        self.draw_ctx
+    }
+}
+
+impl<'a> DerefMut for PaintCtx<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.draw_ctx
+    }
+}
 
 pub struct EventCtx {}
 
@@ -24,7 +76,11 @@ struct LayoutImpl {
 pub struct Layout(Arc<LayoutImpl>);
 
 impl Layout {
-    pub fn new(
+    pub fn new(measurements: Measurements) -> Layout {
+        Self::with_child_layouts(measurements, vec![])
+    }
+
+    pub fn with_child_layouts(
         measurements: Measurements,
         child_layouts: impl Into<Vec<(Offset, Layout)>>,
     ) -> Layout {
@@ -69,11 +125,11 @@ pub struct Widget<T: ?Sized = dyn WidgetDelegate> {
 }
 
 // TODO remove this once we can do custom unsized coercions in stable
-impl<T: WidgetDelegate+'static> From<Widget<T>> for Widget<dyn WidgetDelegate> {
+impl<T: WidgetDelegate + 'static> From<Widget<T>> for Widget<dyn WidgetDelegate> {
     fn from(other: Widget<T>) -> Self {
         Widget {
             delegate: other.delegate.clone(),
-            state: other.state.clone()
+            state: other.state.clone(),
         }
     }
 }
@@ -106,13 +162,13 @@ impl<T: WidgetDelegate> Widget<T> {
     }
 }
 
-impl <T: ?Sized+WidgetDelegate> Widget<T> {
+impl<T: ?Sized + WidgetDelegate> Widget<T> {
     /// Called to measure this widget and layout the children of this widget.
     #[composable(uncached)]
     pub fn layout(
         &self,
         ctx: &mut LayoutCtx,
-        constraints: &BoxConstraints,
+        constraints: BoxConstraints,
         env: &Environment,
     ) -> Layout {
         Context::cache(
@@ -140,14 +196,14 @@ pub trait WidgetDelegate {
 
     /// Called to measure this widget and layout the children of this widget.
     fn layout(
-        &self,
+        &mut self,
         ctx: &mut LayoutCtx,
-        constraints: &BoxConstraints,
+        constraints: BoxConstraints,
         env: &Environment,
     ) -> Layout;
 
     /// Called to paint the widget
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment);
+    fn paint(&self, ctx: &mut PaintCtx, layout: Layout, env: &Environment);
 
     /// Called only for native window widgets.
     fn window_paint(&self, _ctx: &mut WindowPaintCtx) {}
