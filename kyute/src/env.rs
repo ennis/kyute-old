@@ -1,15 +1,18 @@
-use crate::{data::Data, SideOffsets};
-use kyute_shell::drawing::Color;
+use crate::{data::Data, SideOffsets, Widget};
+use kyute_shell::{
+    drawing::Color,
+    text::{TextFormat, TextLayout},
+};
 use std::{
     any::{Any, TypeId},
     borrow::Borrow,
     collections::HashMap,
     fmt,
+    hash::{Hash, Hasher},
     marker::PhantomData,
     rc::Rc,
     sync::Arc,
 };
-use kyute_shell::text::{TextFormat, TextLayout};
 //use crate::style::StyleSet;
 
 /// A type that identifies a named value in an [`Environment`], of a particular type `T`.
@@ -18,17 +21,17 @@ use kyute_shell::text::{TextFormat, TextLayout};
 /// types that cannot be created in const contexts. If we decide to remove compile-time default
 /// values for environment keys, then it might be cleaner to revert to representing keys with
 /// const `Key` values instead of `impl Key` types.
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct EnvKey<T> {
     key: &'static str,
-    _type: PhantomData<T>
+    _type: PhantomData<T>,
 }
 
 impl<T> Clone for EnvKey<T> {
     fn clone(&self) -> Self {
         EnvKey {
             key: self.key,
-            _type: PhantomData
+            _type: PhantomData,
         }
     }
 }
@@ -39,7 +42,7 @@ impl<T> EnvKey<T> {
     pub const fn new(key: &'static str) -> EnvKey<T> {
         EnvKey {
             key,
-            _type: PhantomData
+            _type: PhantomData,
         }
     }
 }
@@ -82,6 +85,13 @@ impl Data for Environment {
     }
 }
 
+impl Hash for Environment {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // reference semantics
+        (&*self.0 as *const EnvImpl).hash(state);
+    }
+}
+
 #[derive(Clone)]
 struct EnvImpl {
     parent: Option<Arc<EnvImpl>>,
@@ -89,7 +99,10 @@ struct EnvImpl {
 }
 
 impl EnvImpl {
-    fn get<T>(&self, key: EnvKey<T>) -> Option<T> where T: EnvValue {
+    fn get<T>(&self, key: EnvKey<T>) -> Option<T>
+    where
+        T: EnvValue,
+    {
         self.values
             .get(key.key)
             .map(|v| {
@@ -111,7 +124,10 @@ impl Environment {
     }
 
     /// Creates a new environment that adds or overrides a given key.
-    pub fn add<T>(mut self, key: EnvKey<T>, value: T) ->  Environment where T: EnvValue {
+    pub fn add<T>(mut self, key: EnvKey<T>, value: T) -> Environment
+    where
+        T: EnvValue,
+    {
         match Arc::get_mut(&mut self.0) {
             Some(env) => {
                 env.values.insert(key.key, Arc::new(value));
@@ -129,7 +145,10 @@ impl Environment {
     }
 
     /// Returns the value corresponding to the key.
-    pub fn get<T>(&self, key: EnvKey<T>) -> Option<T> where T: EnvValue {
+    pub fn get<T>(&self, key: EnvKey<T>) -> Option<T>
+    where
+        T: EnvValue,
+    {
         self.0.get(key)
     }
 

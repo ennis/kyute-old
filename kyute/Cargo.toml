@@ -6,6 +6,7 @@ edition = "2018"
 
 
 [dependencies]
+kyute-macros = { path="macros" }
 kyute-shell = { path="../kyute-shell" }
 tracing = { version = "0.1.25", features = ["attributes"] }
 euclid = "0.22"

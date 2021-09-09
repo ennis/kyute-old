@@ -8,14 +8,15 @@ use std::{
     cell::{Ref, RefCell},
     collections::{hash_map::DefaultHasher, HashMap},
     hash::{Hash, Hasher},
+    marker::PhantomData,
     mem,
     panic::Location,
     sync::Arc,
 };
+use std::ops::Deref;
 
 struct ContextImpl {
     key_stack: RefCell<CallKeyStack>,
-    cache_entry_stack: RefCell<Vec<CallKey>>,
     cache: Cache,
 }
 
@@ -33,15 +34,51 @@ impl ContextImpl {
         location: &'static Location<'static>,
         args: Args,
         f: impl FnOnce(&Args) -> T,
-    ) -> T
+    ) -> (CallKey, T)
     where
-        T: Any + Data,
+        T: Any + Clone,
         Args: Hash,
     {
         let key = self.enter_scope(location, 0);
-        let r = self.cache.cache(key, args, f, Some(location));
+        let val = self.cache.cache(key, args, f, Some(location));
         self.exit_scope();
-        r
+        (key, val)
+    }
+
+    fn cache_state<T>(
+        &self,
+        location: &'static Location<'static>,
+        f: impl FnOnce() -> T,
+    ) -> (CallKey, T)
+        where
+            T: Any + Clone,
+    {
+        let key = self.enter_scope(location, 0);
+        let val = self.cache.cache_state(key, f, Some(location));
+        self.exit_scope();
+        (key, val)
+    }
+}
+
+#[derive(Clone)]
+pub struct State<T> {
+    context: Context,
+    key: CallKey,
+    value: T,
+    _phantom: PhantomData<*const T>,
+}
+
+impl<T: 'static> State<T> {
+    pub fn set(&self, value: T) {
+        self.context.set_state(self.key, value);
+    }
+}
+
+impl<T> Deref for State<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
     }
 }
 
@@ -56,11 +93,16 @@ impl Context {
     fn new() -> Context {
         Context(Arc::new(ContextImpl {
             key_stack: RefCell::new(CallKeyStack::new()),
-            cache_entry_stack: RefCell::new(vec![]),
             cache: Cache::new(),
         }))
     }
 
+    fn set_state<T: 'static>(&self, key: CallKey, val: T) {
+        self.0.cache.set_state(key, val);
+    }
+}
+
+impl Context {
     pub fn current() -> Context {
         CONTEXT.with(|x| x.clone())
     }
@@ -82,15 +124,32 @@ impl Context {
     #[track_caller]
     pub fn cache<T, Args>(args: Args, f: impl FnOnce(&Args) -> T) -> T
     where
-        T: Any + Data,
+        T: Any + Clone,
         Args: Hash,
     {
         let location = Location::caller();
-        CONTEXT.with(|cx| cx.0.cache(location, args, f))
+        CONTEXT.with(|cx| cx.0.cache(location, args, f).1)
     }
 
     #[track_caller]
-    pub fn in_scope<R>(index: usize, f: impl FnOnce() -> R) -> R {
+    pub fn state<T>(init: impl FnOnce() -> T) -> State<T>
+    where
+        T: Any + Clone,
+    {
+        let location = Location::caller();
+        CONTEXT.with(|cx| {
+            let (key, value) = cx.0.cache_state(location, init);
+            State {
+                context: cx.clone(),
+                key,
+                value,
+                _phantom: Default::default(),
+            }
+        })
+    }
+
+    #[track_caller]
+    pub fn scoped<R>(index: usize, f: impl FnOnce() -> R) -> R {
         Context::enter(0);
         let r = f();
         Context::exit();

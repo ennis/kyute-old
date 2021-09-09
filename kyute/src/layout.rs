@@ -2,6 +2,7 @@
 use crate::{Offset, Point, SideOffsets, Size};
 use std::{
     fmt,
+    hash::{Hash, Hasher},
     ops::{Bound, RangeBounds},
 };
 
@@ -10,6 +11,15 @@ use std::{
 pub struct BoxConstraints {
     pub min: Size,
     pub max: Size,
+}
+
+impl Hash for BoxConstraints {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.min.width.to_bits().hash(state);
+        self.min.height.to_bits().hash(state);
+        self.max.width.to_bits().hash(state);
+        self.max.height.to_bits().hash(state);
+    }
 }
 
 impl BoxConstraints {

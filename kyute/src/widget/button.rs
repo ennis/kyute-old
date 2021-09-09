@@ -1,47 +1,17 @@
-use crate::{
-    align_boxes,
-    composition::CompositionCtx,
-    core::{EventCtx, LayoutCtx, Widget, PaintCtx, WidgetDelegate},
-    env::Environment,
-    event::{Event, PointerEventKind},
-    layout::{BoxConstraints, Measurements},
-    widget::text::text,
-    Alignment, Rect, SideOffsets, Size,
-};
+use crate::{align_boxes, core2::{EventCtx, LayoutCtx}, event::PointerEventKind, Alignment, BoxConstraints, Environment, Event, Measurements, SideOffsets, WidgetDelegate, Size, Rect};
 use kyute_shell::drawing::{Brush, Color};
 use std::convert::TryFrom;
-use crate::composition::ActionResult;
-
-#[derive(Copy,Clone)]
-enum ButtonAction {
-    Clicked,
-}
-
-#[derive(Copy,Clone)]
-pub struct ButtonResult(Option<ButtonAction>);
-
-impl ButtonResult {
-    pub fn on_click(&self, f: impl FnOnce()) {
-        match self.0 {
-            None => {}
-            Some(ButtonAction::Clicked) => f(),
-        }
-    }
-}
+use crate::core2::PaintCtx;
 
 struct Button;
 
+/*
 impl WidgetDelegate for Button {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
 
-    fn event(
-        &mut self,
-        ctx: &mut EventCtx,
-        children: &mut [Widget],
-        event: &Event,
-    ) {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event) {
         match event {
             Event::Pointer(p) => match p.kind {
                 PointerEventKind::PointerDown => {
@@ -66,9 +36,8 @@ impl WidgetDelegate for Button {
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
-        children: &mut [Widget],
         constraints: &BoxConstraints,
-        _env: &Environment
+        _env: &Environment,
     ) -> Measurements {
         // measure the label inside
         let padding = SideOffsets::new_all_same(4.0);
@@ -103,13 +72,7 @@ impl WidgetDelegate for Button {
         measurements
     }
 
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx,
-        children: &mut [Widget],
-        bounds: Rect,
-        _env: &Environment
-    ) {
+    fn paint(&mut self, ctx: &mut PaintCtx, bounds: Rect, _env: &Environment) {
         let brush = Brush::solid_color(ctx, Color::new(0.100, 0.100, 0.100, 1.0));
         let fill = Brush::solid_color(ctx, Color::new(0.800, 0.888, 0.100, 1.0));
 
@@ -123,11 +86,4 @@ impl WidgetDelegate for Button {
         }
     }
 }
-
-pub fn button(cx: &mut CompositionCtx, label: &str) -> ButtonResult {
-    cx.enter(0);
-    let action =
-        cx.emit_node(|_| Button, |cx, button| {}, |cx| text(cx, label));
-    cx.exit();
-    ButtonResult(action.cast())
-}
+*/

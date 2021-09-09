@@ -1,38 +1,52 @@
+use kyute::{composable, widget::Flex, Context, Data, Event, Measurements, Widget, WidgetDelegate, BoxConstraints, Environment, Rect, LayoutCtx, Layout, PaintCtx};
 use kyute_shell::platform::Platform;
-use kyute::{Context, Data};
+use std::sync::Arc;
+use kyute::widget::Axis;
 
-#[track_caller]
-fn root() {
-    Context::in_scope(0, || {
-        eprintln!("root: {:?}", Context::current_call_key());
-        window();
-    });
+struct EventCtx;
+
+struct Window;
+impl WidgetDelegate for Window {
+    fn layout(&self, ctx: &mut kyute::LayoutCtx, constraints: &BoxConstraints, env: &Environment) -> kyute::Layout {
+        todo!()
+    }
+
+    fn paint(&self, ctx: &mut kyute::PaintCtx, bounds: Rect, env: &Environment) {
+        todo!()
+    }
 }
 
-
-#[track_caller]
-fn window() {
-    Context::in_scope(0, || {
-        eprintln!("window: {:?}", Context::current_call_key());
-        vbox();
-        vbox();
-    });
+#[composable(uncached)]
+fn root() -> Widget<Window> {
+    window()
 }
 
-#[track_caller]
-fn vbox() {
+#[composable(uncached)]
+fn window() -> Widget<Window> {
+    vbox();
+    Widget::new(Window)
+}
 
-    Context::in_scope(0, || {
-        eprintln!("vbox: {:?}", Context::current_call_key());
-
-        // cached function call
-        Context::cache((), |_| button());
-        Context::cache((), |_| button());
-    });
+#[composable(uncached)]
+fn vbox() -> Widget<Flex> {
+    let mut vbox = Flex::new(Axis::Vertical);
+    vbox.push(button("hello".into()));
+    vbox.push(button("world".into()));
+    Widget::new(vbox)
 }
 
 #[derive(Copy, Clone, Debug)]
 struct Button;
+
+impl WidgetDelegate for Button {
+    fn layout(&self, ctx: &mut LayoutCtx, constraints: &BoxConstraints, env: &Environment) -> Layout {
+        todo!()
+    }
+
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+        todo!()
+    }
+}
 
 impl Data for Button {
     fn same(&self, other: &Self) -> bool {
@@ -40,14 +54,12 @@ impl Data for Button {
     }
 }
 
-#[track_caller]
-fn button() -> Button {
+#[composable(uncached)]
+fn button(label: Arc<str>) -> Widget<Button> {
     // a state entry is created within Context::cache, so this will be added as a dependency of the cache entry
-    let hovered = Context::cache((), |_| false);
-    Context::dump();
-    Button
+    //let hovered = Context::cache((), |_| false);
+    Widget::new(Button)
 }
-
 
 fn main() {
     let platform = Platform::new();
