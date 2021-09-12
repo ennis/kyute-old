@@ -1,10 +1,12 @@
 extern crate self as kyute;
 
+#[macro_use]
+mod data;
+
 //pub mod application;
 mod bloom;
 //mod composition;
 //mod core;
-mod data;
 mod event;
 //mod key;
 mod layout;
@@ -22,6 +24,8 @@ mod call_key;
 mod context;
 mod core2;
 pub mod widget;
+mod application;
+mod cache_cell;
 //mod style;
 
 pub use kyute_macros::composable;

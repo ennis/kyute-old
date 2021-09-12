@@ -1,23 +1,28 @@
-use crate::{
-    align_boxes,
-    core2::{EventCtx, LayoutCtx, PaintCtx},
-    event::PointerEventKind,
-    widget::Text,
-    Alignment, BoxConstraints, Environment, Event, Layout, Measurements, Rect, SideOffsets, Size,
-    WidgetDelegate,
-};
+use crate::{align_boxes, core2::{EventCtx, LayoutCtx, PaintCtx}, event::PointerEventKind, widget::Text, Alignment, BoxConstraints, Environment, Event, Layout, Measurements, Rect, SideOffsets, Size, WidgetDelegate, Widget};
 use kyute_shell::drawing::{Brush, Color};
+use kyute_macros::composable;
 use std::convert::TryFrom;
 
 #[derive(Clone)]
 pub struct Button {
     label: Text,
+    action_queue: ActionQueue<ButtonAction>,
 }
 
 impl Button {
-    pub fn new(label: impl Into<String>) -> Button {
-        Button {
+    #[composable(uncached)]
+    pub fn new(label: impl Into<String>) -> Widget<Button> {
+        Widget::new(Button {
             label: Text::new(label.into()),
+        })
+    }
+}
+
+impl Widget<Button> {
+    #[composable]
+    pub fn on_action(mut self, f: impl FnMut(ButtonAction)) -> Self {
+        for action in self.take_action_queue() {
+
         }
     }
 }
@@ -58,15 +63,11 @@ impl WidgetDelegate for Button {
     fn paint(&self, ctx: &mut PaintCtx, layout: Layout, env: &Environment) {
         let brush = Brush::solid_color(ctx, Color::new(0.100, 0.100, 0.100, 1.0));
         let fill = Brush::solid_color(ctx, Color::new(0.800, 0.888, 0.100, 1.0));
-
         if ctx.is_hovering() {
-            ctx.fill_rectangle(bounds, &fill);
+            ctx.fill_rectangle(layout.bounds(), &fill);
         }
-        ctx.draw_rectangle(bounds, &brush, 2.0);
-
-        for c in children {
-            c.paint(ctx);
-        }
+        ctx.draw_rectangle(layout.bounds(), &brush, 2.0);
+        self.label.paint(ctx, layout.child(0).unwrap());
     }
 }
 

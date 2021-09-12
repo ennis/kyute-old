@@ -1,5 +1,5 @@
 //! Types and functions used for layouting widgets.
-use crate::{Offset, Point, SideOffsets, Size};
+use crate::{Offset, Point, SideOffsets, Size, Data};
 use std::{
     fmt,
     hash::{Hash, Hasher},
@@ -11,6 +11,15 @@ use std::{
 pub struct BoxConstraints {
     pub min: Size,
     pub max: Size,
+}
+
+impl Data for BoxConstraints {
+    fn same(&self, other: &Self) -> bool {
+        self.min.width.to_bits() == other.min.width.to_bits() &&
+        self.min.height.to_bits() == other.min.height.to_bits() &&
+        self.max.width.to_bits() == other.max.width.to_bits() &&
+        self.max.height.to_bits() == other.max.height.to_bits()
+    }
 }
 
 impl Hash for BoxConstraints {

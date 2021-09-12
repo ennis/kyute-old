@@ -29,6 +29,7 @@ impl ContextImpl {
         self.key_stack.borrow_mut().exit();
     }
 
+    // TODO: replace with an explicit dependency on the
     fn cache<T, Args>(
         &self,
         location: &'static Location<'static>,

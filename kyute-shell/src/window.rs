@@ -78,7 +78,10 @@ impl<'a> WindowDrawContext<'a> {
             d2d_device_context.SetDpi(dpi, dpi);
             // the draw context acquires shared ownership of the device context, but that's OK since we borrow the window,
             // so we can't create another WindowDrawContext that would conflict with it.
-            DrawContext::from_device_context(platform.0.d2d_factory.0.clone(), d2d_device_context.0.clone())
+            DrawContext::from_device_context(
+                platform.0.d2d_factory.0.clone(),
+                d2d_device_context.0.clone(),
+            )
         };
 
         WindowDrawContext {

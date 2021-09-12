@@ -1,9 +1,12 @@
 use crate::CRATE;
-use proc_macro2::{Span, Ident};
+use proc_macro2::{Ident, Span};
 use quote::{quote, ToTokens};
-use syn::{spanned::Spanned, FnArg, Path};
-use syn::parse::{Parser, ParseStream};
-use syn::punctuated::Punctuated;
+use syn::{
+    parse::{ParseStream, Parser},
+    punctuated::Punctuated,
+    spanned::Spanned,
+    FnArg, Path,
+};
 
 struct ComposableArgs {
     uncached: bool,
@@ -21,9 +24,7 @@ impl syn::parse::Parse for ComposableArgs {
                 // TODO warn unrecognized attrib
             }
         }
-        Ok(ComposableArgs {
-            uncached
-        })
+        Ok(ComposableArgs { uncached })
     }
 }
 
@@ -33,7 +34,7 @@ pub fn generate_composable(
 ) -> proc_macro::TokenStream {
     // works only on trait declarations
     let fn_item: syn::ItemFn = syn::parse_macro_input!(item as syn::ItemFn);
-    let attr_args : ComposableArgs = syn::parse_macro_input!(attr as ComposableArgs);
+    let attr_args: ComposableArgs = syn::parse_macro_input!(attr as ComposableArgs);
 
     let vis = &fn_item.vis;
     let attrs = &fn_item.attrs;

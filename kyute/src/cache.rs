@@ -60,6 +60,8 @@ impl CacheEntry {
 
 pub(crate) struct Cache {
     // keys: RefCell<HashMap<CallKey, CacheEntryKey>>,
+
+    // TODO: replace with a generic hash
     entries: RefCell<HashMap<CallKey, CacheEntry>>,
     /// Keeps track of reentrant calls to `cache`, for dependency tracking.
     current_dependencies: RefCell<Vec<CallKey>>,
@@ -142,6 +144,8 @@ impl Cache {
         (value, deps)
     }
 
+    // TODO: this is a single-entry cache, indexed by the CallKey;
+    // replace with a generic cache
     pub(crate) fn cache_impl<T: Any + Clone>(
         &self,
         key: CallKey,

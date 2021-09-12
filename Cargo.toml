@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "artifice",    # sample application
     "kyute",    # user interface library - widgets and application architecture
     "kyute-shell",    # user interface library - windowing and system integration
     "kyute/macros"

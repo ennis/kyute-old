@@ -1,4 +1,4 @@
-use crate::{BoxConstraints, Context, Environment, Event, Measurements, Offset, Point, Rect, Size};
+use crate::{BoxConstraints, Context, Environment, Event, Measurements, Offset, Point, Rect, Size, Data};
 use kyute_macros::composable;
 use kyute_shell::drawing::DrawContext;
 use std::{
@@ -6,6 +6,8 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex, Weak},
 };
+use std::cell::RefCell;
+use crate::cache_cell::CacheCell;
 
 /// Context passed to widgets during the layout pass.
 ///
@@ -28,6 +30,7 @@ impl<'a> PaintCtx<'a> {
         // FIXME: is the local origin always on the top-left corner?
         Rect::new(Point::origin(), self.window_bounds.size)
     }
+
 
     /*/// Returns the size of the node.
     pub fn size(&self) -> Size {
@@ -102,20 +105,34 @@ impl Layout {
         self.0.measurements.baseline
     }
 
+    pub fn bounds(&self) -> Rect {
+        Rect::new(Point::ORIGIN, self.0.measurements.size)
+    }
+
     pub fn child_layouts(&self) -> &[(Offset, Layout)] {
         &self.0.child_layouts
     }
+
+    pub fn child(&self, at: usize) -> Option<Layout> {
+        self.0.child_layouts.get(at).map(|(offset, layout)| layout.clone())
+    }
 }
+
 
 struct WidgetImpl<T: ?Sized = dyn WidgetDelegate> {
     delegate: T,
 }
 
-struct WidgetState {}
+struct WidgetState {
+    cached_layout: CacheCell<(Widget,BoxConstraints), Layout>,
+    action_queue: RefCell<Vec<>>,
+}
 
 impl Default for WidgetState {
     fn default() -> Self {
-        WidgetState {}
+        WidgetState {
+            cached_layout: CacheCell::default()
+        }
     }
 }
 
@@ -131,6 +148,13 @@ impl<T: WidgetDelegate + 'static> From<Widget<T>> for Widget<dyn WidgetDelegate>
             delegate: other.delegate.clone(),
             state: other.state.clone(),
         }
+    }
+}
+
+impl<T: ?Sized> Data for Widget<T> {
+    fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.delegate, &other.delegate) &&
+        Arc::ptr_eq(&self.state, &other.state)
     }
 }
 
@@ -164,23 +188,19 @@ impl<T: WidgetDelegate> Widget<T> {
 
 impl<T: ?Sized + WidgetDelegate> Widget<T> {
     /// Called to measure this widget and layout the children of this widget.
-    #[composable(uncached)]
     pub fn layout(
         &self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
         env: &Environment,
     ) -> Layout {
-        Context::cache(
-            (self.clone(), constraints.clone(), env.clone()),
-            move |_| {
-                self.delegate
-                    .lock()
-                    .unwrap()
-                    .delegate
-                    .layout(ctx, constraints, env)
-            },
-        )
+        self.state.cached_layout.cache((self.clone(), constraints), || {
+            self.delegate
+                .lock()
+                .unwrap()
+                .delegate
+                .layout(ctx, constraints, env)
+        })
     }
 }
 

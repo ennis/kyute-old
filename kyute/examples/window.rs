@@ -20,27 +20,20 @@ fn gui(cx: &mut CompositionCtx) {
                         w::button(cx, &format!("click me: {}", counter));
                         w::button(cx, &format!("click me again: {}", counter))
                             .on_click(|| *counter += 42.0);
-                        w::slider(cx, 0.0, 100.0, *counter)
-                            .on_value_change(|v| *counter = v);
+                        w::slider(cx, 0.0, 100.0, *counter).on_value_change(|v| *counter = v);
 
                         cx.with_state(String::new, |cx, str| {
-                            w::text_line_edit(cx, str)
-                                .on_text_changed(|s| *str = s.to_string());
+                            w::text_line_edit(cx, str).on_text_changed(|s| *str = s.to_string());
                             w::text(cx, str);
                         });
                     });
                 });
-            }
+            },
         );
     });
 
-
     w::EnvWrapper::new(get_default_application_style())
-        .contents(
-            w::StateWrapper::new::<f64>(|| 0.0)
-                .contents()
-
-        );
+        .contents(w::StateWrapper::new::<f64>(|| 0.0).contents());
 }
 
 /*
@@ -114,8 +107,6 @@ fn node_row(cx: &mut CompositionCtx, depth: u32, node: &mut Node) {
         }
     });
 }*/
-
-
 
 fn main() {
     Platform::init();
