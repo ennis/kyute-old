@@ -1,7 +1,8 @@
-use crate::{core::{
-    EventCtx, FocusAction, LayoutCtx, Widget, PaintCtx, RepaintRequest, WidgetDelegate,
-    WindowPaintCtx,
-}, event::{Event, InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind}, layout::{BoxConstraints, Measurements}, NodeId, PhysicalSize, Point, Rect, Size, Environment};
+use crate::{
+    core2::WidgetState, event::InputState, region::Region, BoxConstraints, Context, Environment,
+    Event, EventCtx, LayoutCtx, LayoutItem, Measurements, Offset, PaintCtx, Rect, Size, Widget,
+    WidgetDelegate,
+};
 use keyboard_types::KeyState;
 use kyute_shell::{
     drawing::Color,
@@ -10,108 +11,107 @@ use kyute_shell::{
     winit,
     winit::event::{DeviceId, VirtualKeyCode, WindowEvent},
 };
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 use tracing::trace_span;
+use crate::composable;
 
-/// Window event callbacks.
-struct Callbacks {
-    on_close_requested: Option<Box<dyn Fn()>>,
-    on_move: Option<Box<dyn Fn(u32, u32)>>,
-    on_resize: Option<Box<dyn Fn(u32, u32)>>,
-    on_focus_gained: Option<Box<dyn Fn()>>,
-    on_focus_lost: Option<Box<dyn Fn()>>,
-}
-
-impl Default for Callbacks {
-    fn default() -> Callbacks {
-        Callbacks {
-            on_close_requested: None,
-            on_move: None,
-            on_resize: None,
-            on_focus_gained: None,
-            on_focus_lost: None,
-        }
-    }
+struct WindowState {
+    window: PlatformWindow,
+    //pointer_grab: Option<WeakWidgetRef>,
+    //hot: Option<WeakWidgetRef>,
+    inputs: InputState,
+    scale_factor: f64,
+    invalid: Region,
+    needs_layout: bool,
 }
 
 /// A window managed by kyute.
-// TODO remove this, and make window handling built-in?
-// move ownership of the PlatformWindow to kyute-shell?
-//
-// Potential issues:
-// - creating a child window for 3D rendering => no platform window
-pub struct WindowWidget {
-    title: String,
+pub struct Window {
+    window_state: Arc<WindowState>,
+    children: Vec<Widget>,
 }
 
-impl WindowWidget {
-    pub fn new() -> WindowWidget {
-        WindowWidget {
-            title: "".to_string(),
-        }
-    }
+impl Window {
+    #[composable(uncached)]
+    pub fn new(
+        window_builder: winit::window::WindowBuilder,
+        children: Vec<Widget>,
+    ) -> Widget<Window> {
 
-    pub fn title(&self) -> &str {
-        &self.title
-    }
+        // retained widget state
+        let widget_state = WidgetState {};
 
-    pub fn set_title(&mut self, new_title: impl Into<String>) {
-        self.title = new_title.into();
-        // TODO
-        //self.window.window().set_title(&self.title);
+        // create the window (called only once)
+        /*let window_state = Context::cache((), move |_| {
+            // FIXME: parent window?
+            // FIXME: we cannot create the window here: due to winit's design,
+            // the event loop cannot be accessed in `'static` contexts (we must use &EventLoopWindowTarget, which
+            // has a closure-bound unique lifetime).
+            //
+            // Solutions:
+            // 1. delay the creation of the window: `WidgetDelegate::mount(&AppCtx)`?
+            //
+            let window =
+                PlatformWindow::new(Platform::instance().event_loop(), window_builder, None)
+                    .unwrap();
+            let ws = WindowState {
+                window,
+                //pointer_grab: None,
+                //hot: None,
+                inputs: Default::default(),
+                scale_factor: 0.0,
+                invalid: Default::default(),
+                needs_layout: false,
+            };
+
+            Arc::new(ws)
+        });*/
+
+        // FIXME: update window properties
+
+        todo!()
+
+        /*// TODO update window state from parameters
+        Widget::new(
+            widget_state,
+            Window {
+                window_state,
+                children,
+            },
+        )*/
     }
 }
 
-impl WindowWidget {
-    /*fn get_pointer_event_target(
-        &self,
-        pointer_position: Point,
-        children: &[Node],
-    ) -> Option<NodeId> {
-        self.focus
-            .pointer_grab
-            .or_else(|| children.iter().find_map(|c| c.hit_test(pointer_position)))
-    }*/
-}
-
-impl WidgetDelegate for WindowWidget {
+impl WidgetDelegate for Window {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
 
-    /*/// Handles raw window events.
-    fn window_event(
-        &mut self,
-        ctx: &mut WindowEventCtx,
-        children: &mut [Node],
-        winit_event: &kyute_shell::winit::event::WindowEvent,
-    ) {
-    }*/
-
-    fn event(&mut self, ctx: &mut EventCtx, children: &mut [Widget], event: &Event) {
-        // this node doesn't receive processed events
-    }
-
     fn layout(
-        &mut self,
+        &self,
         ctx: &mut LayoutCtx,
-        children: &mut [Widget],
-        constraints: &BoxConstraints,
-        _env: &Environment,
-    ) -> Measurements {
-        // layout children
-        let window_size = ctx.parent_window_size();
-        for child in children.iter_mut() {
-            child.layout(ctx, &BoxConstraints::loose(window_size));
-        }
-        // A child window doesn't take any space in its parent
-        Measurements::default()
+        constraints: BoxConstraints,
+        env: &Environment,
+    ) -> LayoutItem {
+        let (width, height): (f64, f64) = self.window_state.window.window().inner_size().into();
+
+        let layouts: Vec<_> = self
+            .children
+            .iter()
+            .map(|child| {
+                (
+                    Offset::zero(),
+                    child.layout(ctx, BoxConstraints::loose(Size::new(width, height)), env),
+                )
+            })
+            .collect();
+
+        LayoutItem::with_children(Measurements::new(Size::new(width, height)), layouts)
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, children: &mut [Widget], bounds: Rect,
-             _env: &Environment) {
-        for c in children.iter_mut() {
-            c.paint(ctx);
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+        for c in self.children.iter() {
+            c.paint(ctx, bounds, env);
         }
     }
 }

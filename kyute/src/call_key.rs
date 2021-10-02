@@ -8,7 +8,7 @@ use std::{
 
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct CallKey(u64);
+pub struct CallKey(pub(crate) u64);
 
 impl fmt::Debug for CallKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

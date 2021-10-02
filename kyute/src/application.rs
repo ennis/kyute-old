@@ -3,7 +3,7 @@
 //! Provides the `run_application` function that opens the main window and translates the incoming
 //! events from winit into the events expected by a kyute [`NodeTree`](crate::node::NodeTree).
 
-use crate::{BoxConstraints, Context, Point, Widget};
+use crate::{BoxConstraints, Context, Point, Widget, LayoutItem};
 use keyboard_types::KeyState;
 use kyute_shell::{
     platform::Platform,
@@ -34,11 +34,7 @@ struct PendingAction {
     payload: Box<dyn Any>,
 }*/
 
-// The internal event loop is managed by winit, so there will always be a `Window` object somewhere.
-// It might be a `PlatformWindow` if we want a swapchain with it, or something else, but
-// if will always contain a `winit::Window` internally.
-// To simplify things, add a method to `Widget` to return the window?
-// -> but then the widget doesn't have sole control over the window anymore.
+
 
 /// Global application context. Contains stuff passed to all widget contexts (Event,Layout,Paint...)
 pub struct AppCtx {
@@ -103,19 +99,24 @@ impl AppCtx {
     }*/
 }
 
+
 fn get_root_widget(root_widget_fn: fn() -> Widget) -> Widget {
     root_widget_fn()
 }
 
-fn find_window_widget(root: Widget, window_id: WindowId) -> Option<Widget> {
-    // TODO
-    Context::cache((root, widget), || todo!())
-}
+/*fn build_window_widgets_map(root: LayoutItem) -> HashMap<WindowId, LayoutItem>
+{
+    fn build_map_recursive(item: LayoutItem) {}
+    let mut map = HashMap::new();
+    Context::cache(root,
+                   |root| { });
+}*/
 
 pub fn run(root_widget_fn: fn() -> Widget) {
-    let event_loop = EventLoop::new();
+
     let root_widget = root_widget_fn();
 
+    let mut event_loop = EventLoop::new();
     let mut app_ctx = AppCtx::new();
 
     // run event loop

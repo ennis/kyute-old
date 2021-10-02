@@ -432,3 +432,201 @@ Widget delegates directly call handlers, which update parts of the state
 -> any mutable state must be wrapped
 -> we end up with lenses, which defeats the purpose of composables in the first place 
 
+# Focus/defocus
+1. mouse event is propagated to a target widget
+2. event queue for this widget is invalidated, forcing a re-evaluation of a new revision of the widget tree
+3. during recomp, `TextEdit::new` sees the event and acquires the focus (somehow)
+4. the previously focused item in the window is invalidated, forcing another re-evaluation 
+
+Cached values:
+- Widget: event queue
+- Widget: hovered
+- Widget: focused
+
+F(AppState) -> GUI: not enough
+F(AppState, InternalState) -> GUI
+focus is in internal state
+
+
+
+```rust
+fn widget() -> Widget<Button> {
+    
+    let b = Button::new();
+    
+    if b.focused() {
+        // do stuff if button is focused 
+    } else {
+        // stuff if unfocused
+    }
+    
+    if b.hovered() {
+        // stuff if hovered
+    }
+}
+
+struct WidgetBox<T: ?Sized + WidgetDelegate> {
+    hovered: State<bool>,
+    focused: State<bool>,
+    delegate: T
+}
+
+struct Widget<T>(Arc<WidgetBox<T>>);
+
+// widgets don't need to be stored in the cache:
+// we only need to signal that the value computed by the function might not be valid anymore
+
+impl Button {
+    #[composable(synthetic)]
+    pub fn new() -> Widget<Button> {
+
+        // makes the parent value (Widget<Button>) dependent on the focus state
+        let widget_state = WidgetState::new();
+        let events = widget_state.take_events();
+        
+        // ... iterate over events ...
+        widget_state.acquire_focus();
+        
+        Widget {
+            focused,
+            hovered,
+            delegate: Button::new(...),
+        }
+        
+    }
+}
+
+
+impl Widget<Button> {
+    pub fn focused(&self) -> bool {
+        self.0.focused
+    }
+}
+
+```
+
+# Widget tree
+Could be:
+
+## Option A: an owned object, non-cloneable, fully rebuilt on each recomposition
+- if so, avoid doing too many recomps
+- widgets can't be cached
+- costly parts could be wrapped in Arc so that they may be cached/shared between comps
+
+## Option B: `Arc<WidgetImpl>`: fully immutable, shareable data object
+- no interior mutability: not easy to cache data inside, must use an map outside
+
+## Option C: `Arc<RefCell<WidgetImpl>>`: shareable with interior mutability
+- somewhat error prone?
+
+## Issues:
+### Sending targeted events
+- e.g keyboard events to currently focused item
+
+With options B and C, could in theory keep an weak ref to the widget.
+With option A, widgets are only identifiable by ID, and can only reach it through a traversal, for which the delegate must cooperate.
+The traversal could be accelerated by a bloom filter, but this requires additional bookkeeping.
+
+- druid: bloom filter
+- iced: no targeted events (full traversal on every event)
+
+Let's go with option B. How to efficiently deliver targeted events?
+(delivery = finding the widget with a specified key and calling `Widget::event` on it)
+A traversal is necessary, unless a more complete widget graph (with parent links) is created. 
+However, creating a more complete widget graph has some overhead (memory and syntactical).
+Note that such a graph already exists: it's the cache dependency graph.
+
+### Keeping widget identity across recomps
+With option A, the widget object has no identity across recomp: given two `Widget` objects, we initially have no way of telling whether
+they are actually the same widget but at two different times. To do so, we must add some key: it can be a CallKey or
+a synthesized widget ID. The CallKey seems more appropriate.
+
+With option B, same thing: a widget's state can change across recomp, but still keep its own "identity", so we must use a key.
+
+With option C: the identity is the pointer in the Arc itself. Since we use interior mutability, we can mutate the widget state
+without affecting its identity.
+
+### TextEdit
+A text editor widget should work like this:
+- create a TextEdit object with some string
+- layout & render
+- propagate events:
+  - if key event, convert to char, send updated string 
+  - this triggers a recomp
+- recomp catches the updated string and updates some internal state entry, which in turn invalidates more cache entries  
+
+# High-level architectures
+1. A fully retained, stateful, mutable widget tree with a functional layer on top
+  - functions return tree mutations instead of full widgets
+2. Moxie-style (maybe?), functions return fully formed widget, widget identity with call keys, cache with dependency tree 
+
+```rust
+#[composable]
+fn labeled_widget(label: &str) -> Widget {
+    let mut slider_value = Context::state(|| 0.0);
+    let slider = Slider::new(slider_value.get());
+    // issue: if slider_value changes in the next line, the label will be built for nothing 
+    let label = Label::new(format!("{}_{}", label, slider_value.get()));
+    slider.on_change(|new_value| slider_value.set(new_value));
+    HBox::from([label, vbox]).into()
+}
+```
+
+```rust
+#[track_caller]
+fn labeled_widget(label: &str) -> Widget {
+    // Rotates the table entries in the current group so that a given call key marker
+    // ends up in the current slot, then go to the next slot.
+    // If the call key wasn't found, insert a call key tag.
+    Context::tagged_group(move || {
+        let mut changed = false;
+        changed |= Context::dirty_flag();
+        changed |= Context::changed(label);
+
+        if !changed {
+            // expect a widget
+            let value = Context::next_value::<Widget>();
+            // skip dependency group
+            Context::skip_to_end_of_group();
+            value
+        } else {
+            // enter dependency group
+            // we don't actually need to do a key search for the group here: either 
+            // there's a group there, and enter it, or there's not, and create the group
+            Context::untagged_group(move || {
+                let mut slider_value = Context::state(|| 0.0);
+                let slider = Slider::new(slider_value.get());
+                slider.on_change(|new_value| slider_value.set(new_value));
+                let label = Label::new(format!("{}_{}", label, slider_value.get()));
+                HBox::from([label, vbox]).into()
+            })
+        };
+    })
+}
+```
+
+Translates into the following slot table:
+    
+    0: StartGroup(<labeled_widget@0>)
+    1:     Value(String)   // label: &str
+    2:     Value(Widget)   // return value of <labeled_widget>
+    3:     StartGroup(<labeled_widget@1>)  // dependency group of #2
+    4:         Value(...)
+    5:     EndGroup()
+    6: EndGroup()
+
+
+    Tag         (<labeled_widget@0>)
+    StartGroup 
+    Flag        (dirty)
+    Value       (String)
+    Value       (Widget)
+    Tag         (<labeled_widget@566>)
+    Value       (f32)
+    Tag         (<labeled_widget@567>)
+    Value       (WidgetState)
+    Value       (SliderState)
+    Value       ...       
+    EndGroup
+
+

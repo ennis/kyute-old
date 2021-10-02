@@ -1,13 +1,20 @@
-use crate::{BoxConstraints, Context, Environment, Event, Measurements, Offset, Point, Rect, Size, Data};
+use crate::{
+    cache_cell::CacheCell,
+    event::{InputState, PointerEvent},
+    layout::LayoutItem,
+    region::Region,
+    BoxConstraints, Context, Data, Environment, Event, Measurements, Offset, Point, Rect, Size,
+};
 use kyute_macros::composable;
-use kyute_shell::drawing::DrawContext;
+use kyute_shell::{drawing::DrawContext, winit::window::WindowId};
 use std::{
+    cell::{Cell, RefCell},
+    fmt,
+    fmt::Formatter,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex, Weak},
 };
-use std::cell::RefCell;
-use crate::cache_cell::CacheCell;
 
 /// Context passed to widgets during the layout pass.
 ///
@@ -31,6 +38,10 @@ impl<'a> PaintCtx<'a> {
         Rect::new(Point::origin(), self.window_bounds.size)
     }
 
+    ///
+    pub fn is_hovering(&self) -> bool {
+        todo!()
+    }
 
     /*/// Returns the size of the node.
     pub fn size(&self) -> Size {
@@ -65,124 +76,94 @@ impl<'a> DerefMut for PaintCtx<'a> {
     }
 }
 
-pub struct EventCtx {}
+pub struct EventCtx {
+    //pub(crate) focus_request: WeakWidgetRef,
+}
+
+impl EventCtx {
+    pub fn enqueue_action(&mut self) {}
+
+    /// Returns the bounds of the current widget.
+    // TODO in what space?
+    pub fn bounds(&self) -> Rect {
+        todo!()
+    }
+
+    /// Requests a redraw of the current node and its children.
+    pub fn request_redraw(&mut self) {
+        todo!()
+    }
+
+    pub fn request_recomposition(&mut self) {
+        todo!()
+    }
+
+    /// Requests a relayout of the current node.
+    pub fn request_relayout(&mut self) {
+        todo!()
+    }
+
+    /// Requests that the current node grabs all pointer events in the parent window.
+    pub fn capture_pointer(&mut self) {
+        todo!()
+    }
+
+    /// Returns whether the current node is capturing the pointer.
+    pub fn is_capturing_pointer(&self) -> bool {
+        todo!()
+    }
+
+    /// Releases the pointer grab, if the current node is holding it.
+    pub fn release_pointer(&mut self) {
+        todo!()
+    }
+
+    /// Acquires the focus.
+    pub fn request_focus(&mut self) {
+        todo!()
+    }
+
+    /// Returns whether the current node has the focus.
+    pub fn has_focus(&self) -> bool {
+        todo!()
+    }
+
+    /// Signals that the passed event was handled and should not bubble up further.
+    pub fn set_handled(&mut self) {
+        todo!()
+    }
+
+    #[must_use]
+    pub fn handled(&self) -> bool {
+        todo!()
+    }
+}
 
 pub struct WindowPaintCtx {}
 
-#[derive(Clone, Debug)]
-struct LayoutImpl {
-    measurements: Measurements,
-    child_layouts: Vec<(Offset, Layout)>,
-}
+/// Internal widget state.
+#[derive(Clone)]
+pub struct WidgetState {}
 
-#[derive(Clone, Debug)]
-pub struct Layout(Arc<LayoutImpl>);
-
-impl Layout {
-    pub fn new(measurements: Measurements) -> Layout {
-        Self::with_child_layouts(measurements, vec![])
-    }
-
-    pub fn with_child_layouts(
-        measurements: Measurements,
-        child_layouts: impl Into<Vec<(Offset, Layout)>>,
-    ) -> Layout {
-        Layout(Arc::new(LayoutImpl {
-            measurements,
-            child_layouts: child_layouts.into(),
-        }))
-    }
-
-    pub fn size(&self) -> Size {
-        self.0.measurements.size
-    }
-
-    pub fn measurements(&self) -> Measurements {
-        self.0.measurements
-    }
-
-    pub fn baseline(&self) -> Option<f64> {
-        self.0.measurements.baseline
-    }
-
-    pub fn bounds(&self) -> Rect {
-        Rect::new(Point::ORIGIN, self.0.measurements.size)
-    }
-
-    pub fn child_layouts(&self) -> &[(Offset, Layout)] {
-        &self.0.child_layouts
-    }
-
-    pub fn child(&self, at: usize) -> Option<Layout> {
-        self.0.child_layouts.get(at).map(|(offset, layout)| layout.clone())
-    }
-}
-
-
-struct WidgetImpl<T: ?Sized = dyn WidgetDelegate> {
+pub struct WidgetInner<T: ?Sized> {
+    // Widget retained state.
+    //state: State<WidgetState>,
+    /// Widget delegate
     delegate: T,
 }
 
-struct WidgetState {
-    cached_layout: CacheCell<(Widget,BoxConstraints), Layout>,
-    action_queue: RefCell<Vec<>>,
-}
-
-impl Default for WidgetState {
-    fn default() -> Self {
-        WidgetState {
-            cached_layout: CacheCell::default()
-        }
-    }
-}
-
-pub struct Widget<T: ?Sized = dyn WidgetDelegate> {
-    delegate: Arc<Mutex<WidgetImpl<T>>>,
-    state: Arc<WidgetState>,
-}
-
-// TODO remove this once we can do custom unsized coercions in stable
-impl<T: WidgetDelegate + 'static> From<Widget<T>> for Widget<dyn WidgetDelegate> {
-    fn from(other: Widget<T>) -> Self {
-        Widget {
-            delegate: other.delegate.clone(),
-            state: other.state.clone(),
-        }
-    }
-}
-
-impl<T: ?Sized> Data for Widget<T> {
-    fn same(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.delegate, &other.delegate) &&
-        Arc::ptr_eq(&self.state, &other.state)
-    }
-}
-
-impl<T: ?Sized> Hash for Widget<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // reference semantics
-        (&*self.delegate as *const Mutex<WidgetImpl<T>>).hash(state);
-        (&*self.state as *const WidgetState).hash(state);
-    }
-}
+/// Represents a widget.
+pub struct Widget<T: ?Sized = dyn WidgetDelegate>(Arc<WidgetInner<T>>);
 
 impl<T: ?Sized> Clone for Widget<T> {
     fn clone(&self) -> Self {
-        Widget {
-            delegate: self.delegate.clone(),
-            state: self.state.clone(),
-        }
+        Widget(self.0.clone())
     }
 }
 
-impl<T: WidgetDelegate> Widget<T> {
-    #[composable(uncached)]
-    pub fn new(delegate: T) -> Widget<T> {
-        let state = Context::state(|| Arc::new(WidgetState::default()));
-        Widget {
-            delegate: Arc::new(Mutex::new(WidgetImpl { delegate })),
-            state: (*state).clone(),
-        }
+impl<T: WidgetDelegate + 'static> From<Widget<T>> for Widget {
+    fn from(widget: Widget<T>) -> Self {
+        Widget(widget.0)
     }
 }
 
@@ -193,14 +174,13 @@ impl<T: ?Sized + WidgetDelegate> Widget<T> {
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
         env: &Environment,
-    ) -> Layout {
-        self.state.cached_layout.cache((self.clone(), constraints), || {
-            self.delegate
-                .lock()
-                .unwrap()
-                .delegate
-                .layout(ctx, constraints, env)
-        })
+    ) -> LayoutItem {
+        // TODO cache the layout result
+        self.0.delegate.layout(ctx, constraints, env)
+    }
+
+    pub fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+        self.0.delegate.paint(ctx, bounds, env)
     }
 }
 
@@ -211,19 +191,16 @@ pub trait WidgetDelegate {
         "WidgetDelegate"
     }
 
-    /// Handles events and pass them down to children.
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event) {}
-
     /// Called to measure this widget and layout the children of this widget.
     fn layout(
-        &mut self,
+        &self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
         env: &Environment,
-    ) -> Layout;
+    ) -> LayoutItem;
 
     /// Called to paint the widget
-    fn paint(&self, ctx: &mut PaintCtx, layout: Layout, env: &Environment);
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment);
 
     /// Called only for native window widgets.
     fn window_paint(&self, _ctx: &mut WindowPaintCtx) {}

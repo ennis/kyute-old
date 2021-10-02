@@ -1,20 +1,24 @@
 //! Windows-specific UI stuff.
-use crate::bindings::Windows::Win32::{
-    Com::{CoCreateInstance, CoInitialize, CLSCTX},
-    Direct2D::{
-        D2D1CreateFactory, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, D2D1_DEBUG_LEVEL,
-        D2D1_DEVICE_CONTEXT_OPTIONS, D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE,
+use crate::{
+    bindings::Windows::Win32::{
+        Com::{CoCreateInstance, CoInitialize, CLSCTX},
+        Direct2D::{
+            D2D1CreateFactory, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, D2D1_DEBUG_LEVEL,
+            D2D1_DEVICE_CONTEXT_OPTIONS, D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE,
+        },
+        Direct3D11::{
+            D3D11CreateDevice, ID3D11Device5, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
+            D3D_DRIVER_TYPE, D3D_FEATURE_LEVEL,
+        },
+        DirectWrite::{DWriteCreateFactory, IDWriteFactory, DWRITE_FACTORY_TYPE},
+        Dxgi::{
+            CreateDXGIFactory2, IDXGIDevice, IDXGIFactory3, DXGI_ADAPTER_DESC1,
+            DXGI_ERROR_NOT_FOUND,
+        },
+        KeyboardAndMouseInput::GetDoubleClickTime,
+        WindowsImagingComponent::{CLSID_WICImagingFactory2, IWICImagingFactory2},
     },
-    Direct3D11::{
-        D3D11CreateDevice, ID3D11Device5, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
-        D3D_DRIVER_TYPE, D3D_FEATURE_LEVEL,
-    },
-    DirectWrite::{DWriteCreateFactory, IDWriteFactory, DWRITE_FACTORY_TYPE},
-    Dxgi::{
-        CreateDXGIFactory2, IDXGIDevice, IDXGIFactory3, DXGI_ADAPTER_DESC1, DXGI_ERROR_NOT_FOUND,
-    },
-    KeyboardAndMouseInput::GetDoubleClickTime,
-    WindowsImagingComponent::{CLSID_WICImagingFactory2, IWICImagingFactory2},
+    winit::event_loop::EventLoop,
 };
 use once_cell::sync::OnceCell;
 use palette::encoding::pixel::RawPixel;
@@ -32,6 +36,7 @@ use std::{
     time::Duration,
 };
 use windows::Interface;
+use winit::event_loop::EventLoopWindowTarget;
 
 macro_rules! sync_com_ptr_wrapper {
     ($wrapper:ident ( $iface:ident ) ) => {
@@ -129,16 +134,23 @@ impl Platform {
         // actually create the platform
         let platform = Self::new_impl();
 
-        if let Err(e) = platform {
-            // if creation failed, don't forget to release the global flag
-            PLATFORM_CREATED.store(false, Ordering::Release);
-            return Err(e.context("failed to create application platform"));
-        }
+        let platform = match platform {
+            Err(e) => {
+                // if creation failed, don't forget to release the global flag
+                PLATFORM_CREATED.store(false, Ordering::Release);
+                return Err(e.context("failed to create application platform"));
+            }
+            Ok(p) => p,
+        };
 
-        platform
+        PLATFORM.with(|p| p.replace(Some(platform.clone())));
+        Ok(platform)
     }
 
     fn new_impl() -> anyhow::Result<Platform> {
+        // --- Application event loop ---
+        let event_loop = EventLoop::new();
+
         // --- TODO Create the graal context (implying a vulkan instance and device)
 
         // FIXME technically we need the target surface so we can pick a device that can
@@ -343,6 +355,19 @@ impl Platform {
         )
     }
 
+    pub fn shutdown() {
+        PLATFORM.with(|p| p.replace(None));
+    }
+
+    // issue: this returns different objects before and after `run` is called.
+    // bigger issue: an `&EventLoopWindowTarget` cannot be accessed without a lifetime, so
+    // we cannot call `Platform::event_loop` in a static context after `run` is called,
+    // which consumes the event loop object.
+    // This means that we must pass around the event loop stuff Fuck this shit already.
+    //pub fn event_loop(&self) -> &EventLoopWindowTarget<()> {
+    //    &self.0.event_loop
+    //}
+
     /// Returns the system double click time in milliseconds.
     pub fn double_click_time(&self) -> Duration {
         unsafe {
@@ -350,4 +375,10 @@ impl Platform {
             Duration::from_millis(ms as u64)
         }
     }
+
+   /* pub fn run() {
+        PLATFORM.with(|p| {
+            p.borrow().unwrap().0.event_loop.run()
+        })
+    }*/
 }

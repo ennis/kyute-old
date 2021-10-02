@@ -1,6 +1,7 @@
 use crate::{
-    core2::{Layout, LayoutCtx, PaintCtx},
-    BoxConstraints, Environment, Measurements, Offset, Rect, Size, Widget, WidgetDelegate,
+    core2::{LayoutCtx, PaintCtx, WidgetState},
+    BoxConstraints, Environment, Event, EventCtx, LayoutItem, Measurements, Offset, Rect, Size,
+    Widget, WidgetDelegate,
 };
 use tracing::trace;
 
@@ -58,32 +59,31 @@ pub enum MainAxisSize {
     Max,
 }
 
+
 pub struct Flex {
     axis: Axis,
     items: Vec<Widget>,
 }
 
 impl Flex {
-    pub fn new(axis: Axis) -> Flex {
-        Flex {
-            axis,
-            items: vec![],
-        }
+    pub fn new(axis: Axis, items: Vec<Widget>) -> Widget<Flex> {
+        todo!()
     }
 
-    pub fn push<T: WidgetDelegate+'static>(&mut self, item: Widget<T>) {
+    pub fn push<T: WidgetDelegate + 'static>(&mut self, item: Widget<T>) {
         self.items.push(item.into())
     }
 }
 
 impl WidgetDelegate for Flex {
+
     fn layout(
-        &mut self,
+        &self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
         env: &Environment,
-    ) -> Layout {
-        let item_layouts: Vec<Layout> = self
+    ) -> LayoutItem {
+        let item_layouts: Vec<LayoutItem> = self
             .items
             .iter()
             .map(|item| item.layout(ctx, constraints, env))
@@ -105,28 +105,28 @@ impl WidgetDelegate for Flex {
         //let spacing = env.get(theme::FlexSpacing);
         let spacing = 1.0;
 
-        let mut positioned_items = Vec::new();
-
-        for item_layout in item_layouts.iter() {
-            let len = self.axis.main_len(item_layout.size());
-            let offset = match self.axis {
-                Axis::Vertical => Offset::new(0.0, d),
-                Axis::Horizontal => Offset::new(d, 0.0),
-            };
-            positioned_items.push((offset, item_layout.clone()));
-            d += len + spacing;
-            d = d.ceil();
-        }
-
         let size = match self.axis {
             Axis::Vertical => Size::new(cross_axis_len, constraints.constrain_height(d)),
             Axis::Horizontal => Size::new(constraints.constrain_width(d), cross_axis_len),
         };
 
-        Layout::with_child_layouts(Measurements::new(size), positioned_items)
+        let mut layout = LayoutItem::new(Measurements::new(size));
+
+        for item_layout in item_layouts.iter() {
+            let len = self.axis.main_len(layout.size());
+            let offset = match self.axis {
+                Axis::Vertical => Offset::new(0.0, d),
+                Axis::Horizontal => Offset::new(d, 0.0),
+            };
+            layout.add_child(offset, item_layout.clone());
+            d += len + spacing;
+            d = d.ceil();
+        }
+
+        layout
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, layout: Layout, env: &Environment) {
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
         todo!()
     }
 }

@@ -283,6 +283,7 @@ impl Data for TextLayout {
     }
 }
 
+/*
 #[cfg(test)]
 mod test {
     use super::Data;
@@ -306,4 +307,4 @@ mod test {
         // intern it, and reuse it for all "text" `&'static str`s.
         assert!(Data::same(&first, &same));
     }
-}
+}*/

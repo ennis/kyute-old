@@ -1,29 +1,11 @@
 use kyute::{
-    composable,
+    application, composable,
     widget::{Axis, Button, Flex},
-    BoxConstraints, Context, Data, Environment, Event, Layout, LayoutCtx, Measurements, PaintCtx,
-    Rect, Widget, WidgetDelegate,
+    BoxConstraints, Context, Data, Environment, Event, LayoutCtx, Measurements, PaintCtx, Rect,
+    Widget, WidgetDelegate, Window,
 };
-use kyute_shell::platform::Platform;
+use kyute_shell::{platform::Platform, winit::window::WindowBuilder};
 use std::sync::Arc;
-
-struct EventCtx;
-
-struct Window;
-impl WidgetDelegate for Window {
-    fn layout(
-        &mut self,
-        ctx: &mut kyute::LayoutCtx,
-        constraints: BoxConstraints,
-        env: &Environment,
-    ) -> kyute::Layout {
-        todo!()
-    }
-
-    fn paint(&self, ctx: &mut kyute::PaintCtx, layout: Layout, env: &Environment) {
-        todo!()
-    }
-}
 
 #[composable(uncached)]
 fn root() -> Widget<Window> {
@@ -32,24 +14,14 @@ fn root() -> Widget<Window> {
 
 #[composable(uncached)]
 fn window() -> Widget<Window> {
-    vbox();
-    Widget::new(Window)
+    todo!()
 }
 
 #[composable(uncached)]
 fn vbox() -> Widget<Flex> {
-    let mut vbox = Flex::new(Axis::Vertical);
-    vbox.push(button("hello".into()));
-    vbox.push(button("world".into()));
-    Widget::new(vbox)
+    todo!()
 }
 
-#[composable(uncached)]
-fn button(label: Arc<str>) -> Widget<Button> {
-    // a state entry is created within Context::cache, so this will be added as a dependency of the cache entry
-    //let hovered = Context::cache((), |_| false);
-    Widget::new(Button::new(label.to_string()))
-}
 
 fn main() {
     let platform = Platform::new();
@@ -62,7 +34,9 @@ fn main() {
         //.with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
         .init();
 
-    root();
+    application::run(|| root().into());
+
+    Platform::shutdown();
 }
 
 /*List::new(|| {
@@ -90,11 +64,10 @@ fn main() {
 // issue: how do you write a composable function that focuses "down" on some state but retains
 // the ability to modify it?
 // what about arbitrarily deep tree data structures?
-#[composable]
+/*#[composable]
 fn item_gui(item: &mut Item) -> Widget {
     // don't modify state in closure, instead, just mark the call to `on_click` as dirty.
-    Button::new("change_name")
-        .on_click(|| item.name = "Hello".into());
+    Button::new("change_name").on_click(|| item.name = "Hello".into());
 
     // .on_click is actually:
     // #[composable] fn on_click() -> bool { }
@@ -121,3 +94,4 @@ fn gui() -> Widget {
 
     Widget::new(vbox).into()
 }
+*/

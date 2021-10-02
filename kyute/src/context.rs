@@ -29,7 +29,7 @@ impl ContextImpl {
         self.key_stack.borrow_mut().exit();
     }
 
-    // TODO: replace with an explicit dependency on the
+    /*// TODO: replace with an explicit dependency on the
     fn cache<T, Args>(
         &self,
         location: &'static Location<'static>,
@@ -58,29 +58,7 @@ impl ContextImpl {
         let val = self.cache.cache_state(key, f, Some(location));
         self.exit_scope();
         (key, val)
-    }
-}
-
-#[derive(Clone)]
-pub struct State<T> {
-    context: Context,
-    key: CallKey,
-    value: T,
-    _phantom: PhantomData<*const T>,
-}
-
-impl<T: 'static> State<T> {
-    pub fn set(&self, value: T) {
-        self.context.set_state(self.key, value);
-    }
-}
-
-impl<T> Deref for State<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
+    }*/
 }
 
 #[derive(Clone)]
@@ -98,9 +76,9 @@ impl Context {
         }))
     }
 
-    fn set_state<T: 'static>(&self, key: CallKey, val: T) {
+    /*fn set_state<T: 'static>(&self, key: CallKey, val: T) {
         self.0.cache.set_state(key, val);
-    }
+    }*/
 }
 
 impl Context {
@@ -122,7 +100,7 @@ impl Context {
         CONTEXT.with(|cx| cx.0.exit_scope())
     }
 
-    #[track_caller]
+    /*#[track_caller]
     pub fn cache<T, Args>(args: Args, f: impl FnOnce(&Args) -> T) -> T
     where
         T: Any + Clone,
@@ -147,7 +125,7 @@ impl Context {
                 _phantom: Default::default(),
             }
         })
-    }
+    }*/
 
     #[track_caller]
     pub fn scoped<R>(index: usize, f: impl FnOnce() -> R) -> R {
@@ -158,7 +136,7 @@ impl Context {
     }
 
     pub fn dump() {
-        CONTEXT.with(|cx| cx.0.cache.dump());
+       //CONTEXT.with(|cx| cx.0.cache.dump());
     }
 }
 

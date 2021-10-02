@@ -1,10 +1,9 @@
 //! Text elements
-use crate::{event::Event, BoxConstraints, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect, WidgetDelegate, Layout};
+use crate::{env::Environment, event::Event, BoxConstraints, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect, WidgetDelegate, LayoutItem};
 use kyute_shell::{
     drawing::{Brush, Color, DrawTextOptions},
     text::{TextFormatBuilder, TextLayout},
 };
-use crate::env::Environment;
 
 #[derive(Clone)]
 pub struct Text {
@@ -28,21 +27,16 @@ impl Text {
 }
 
 impl WidgetDelegate for Text {
-
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event) {
-        // nothing
-    }
-
     fn layout(
-        &mut self,
+        &self,
         _ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
-        _env: &Environment
-    ) -> Layout {
+        _env: &Environment,
+    ) -> LayoutItem {
         let font_name = "Consolas";
         let font_size = 12;
         let text_format = TextFormatBuilder::new()
@@ -61,12 +55,12 @@ impl WidgetDelegate for Text {
             .first()
             .map(|m| m.baseline as f64);
 
-        self.text_layout = Some(text_layout);
-        Layout::new(Measurements { size, baseline } )
+        //self.text_layout = Some(text_layout);
+        LayoutItem::new(Measurements { size, baseline })
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, layout: Layout, _env: &Environment) {
-        /*let text_brush = Brush::solid_color(ctx, Color::new(0.92, 0.92, 0.92, 1.0));
+    fn paint(&self, ctx: &mut PaintCtx, _bounds: Rect, _env: &Environment) {
+        let text_brush = Brush::solid_color(ctx, Color::new(0.92, 0.92, 0.92, 1.0));
 
         if let Some(ref text_layout) = self.text_layout {
             ctx.draw_text_layout(
@@ -77,6 +71,6 @@ impl WidgetDelegate for Text {
             )
         } else {
             tracing::warn!("text layout wasn't calculated before paint")
-        }*/
+        }
     }
 }

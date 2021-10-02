@@ -199,9 +199,7 @@ impl Composer {
         }
     }
 
-    /// Enters a composition scope. Must be matched with a call to `exit`.
-    /// Returns true if the entry wasn't there before and was just created.
-    fn enter(&mut self, key: CallKey) -> bool {
+     fn enter(&mut self, key: CallKey) -> bool {
         let just_created = if !self.rotate(key) {
             // not found, begin a new scope
             self.table
