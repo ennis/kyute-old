@@ -14,55 +14,73 @@ use std::{
     sync::Arc,
 };
 use std::ops::Deref;
+use crate::cache::{ValueEntryKey, CacheWriter};
+
+/*enum ContextCacheState {
+    Idle(Cache),
+    Writing(CacheWriter),
+}
+
+impl ContextCacheState {
+    fn writer(&mut self) -> &mut CacheWriter {
+        match self {
+            ContextState::Idle(_) => {
+                panic!("not recomposing")
+            }
+            ContextState::Writing(writer) => writer
+        }
+    }
+}
+*/
 
 struct ContextImpl {
-    key_stack: RefCell<CallKeyStack>,
-    cache: Cache,
+    key_stack: CallKeyStack,
+   // cache: ContextCacheState,
+}
+
+#[doc(hidden)]
+pub struct StateCell<T> {
+    slot_index: usize,
+    value_key: ValueEntryKey,
+    changed: bool,
+    value: T
+}
+
+impl<T> Drop for StateCell<T> {
+    fn drop(&mut self) {
+        todo!()
+    }
 }
 
 impl ContextImpl {
-    fn enter_scope(&self, location: &'static Location<'static>, index: usize) -> CallKey {
-        self.key_stack.borrow_mut().enter(location, index)
+    fn enter_scope(&mut self, location: &'static Location<'static>, index: usize) -> CallKey {
+        self.key_stack.enter(location, index)
     }
 
-    fn exit_scope(&self) {
-        self.key_stack.borrow_mut().exit();
+    fn exit_scope(&mut self) {
+        self.key_stack.exit();
     }
 
-    /*// TODO: replace with an explicit dependency on the
-    fn cache<T, Args>(
-        &self,
-        location: &'static Location<'static>,
-        args: Args,
-        f: impl FnOnce(&Args) -> T,
-    ) -> (CallKey, T)
-    where
-        T: Any + Clone,
-        Args: Hash,
-    {
-        let key = self.enter_scope(location, 0);
-        let val = self.cache.cache(key, args, f, Some(location));
-        self.exit_scope();
-        (key, val)
-    }
-
-    fn cache_state<T>(
-        &self,
-        location: &'static Location<'static>,
-        f: impl FnOnce() -> T,
-    ) -> (CallKey, T)
+    /*pub fn state<T>(&mut self, location: &'static Location<'static>, init: impl FnOnce() -> T) -> StateCell<T>
         where
             T: Any + Clone,
     {
-        let key = self.enter_scope(location, 0);
-        let val = self.cache.cache_state(key, f, Some(location));
+        let call_key = self.enter_scope(location, 0);
+        let (index, entry) = self.cache.writer().tagged_take_value(call_key, true, init);
+        let state_cell = StateCell {
+            slot_index: index,
+            value_key: entry.key.unwrap(),
+            changed: false,
+            value: ()
+        };
         self.exit_scope();
-        (key, val)
+        state_cell
     }*/
+
 }
 
 #[derive(Clone)]
-pub struct Context(Arc<ContextImpl>);
+pub struct Context(Arc<RefCell<ContextImpl>>);
 
 thread_local! {
     pub static CONTEXT: Context = Context::new();
@@ -70,10 +88,10 @@ thread_local! {
 
 impl Context {
     fn new() -> Context {
-        Context(Arc::new(ContextImpl {
-            key_stack: RefCell::new(CallKeyStack::new()),
-            cache: Cache::new(),
-        }))
+        Context(Arc::new(RefCell::new(ContextImpl {
+            key_stack: CallKeyStack::new()
+            //cache: RefCell::new(Cache::new()),
+        })))
     }
 
     /*fn set_state<T: 'static>(&self, key: CallKey, val: T) {
@@ -81,51 +99,37 @@ impl Context {
     }*/
 }
 
+
 impl Context {
     pub fn current() -> Context {
         CONTEXT.with(|x| x.clone())
     }
 
     pub fn current_call_key() -> CallKey {
-        CONTEXT.with(|cx| cx.0.key_stack.borrow().current())
+        CONTEXT.with(|cx| cx.0.borrow().key_stack.current())
     }
 
     #[track_caller]
     pub fn enter(index: usize) -> CallKey {
         let location = Location::caller();
-        CONTEXT.with(|cx| cx.0.enter_scope(location, index))
+        CONTEXT.with(|cx| cx.0.borrow_mut().enter_scope(location, index))
     }
 
     pub fn exit() {
-        CONTEXT.with(|cx| cx.0.exit_scope())
+        CONTEXT.with(|cx| cx.0.borrow_mut().exit_scope())
     }
 
-    /*#[track_caller]
-    pub fn cache<T, Args>(args: Args, f: impl FnOnce(&Args) -> T) -> T
-    where
-        T: Any + Clone,
-        Args: Hash,
-    {
-        let location = Location::caller();
-        CONTEXT.with(|cx| cx.0.cache(location, args, f).1)
-    }
 
+
+    /// Records a mutable state entry in the cache.
     #[track_caller]
-    pub fn state<T>(init: impl FnOnce() -> T) -> State<T>
+    pub fn state<T>(init: impl FnOnce() -> T) -> StateCell<T>
     where
         T: Any + Clone,
     {
         let location = Location::caller();
-        CONTEXT.with(|cx| {
-            let (key, value) = cx.0.cache_state(location, init);
-            State {
-                context: cx.clone(),
-                key,
-                value,
-                _phantom: Default::default(),
-            }
-        })
-    }*/
+        todo!()
+    }
 
     #[track_caller]
     pub fn scoped<R>(index: usize, f: impl FnOnce() -> R) -> R {

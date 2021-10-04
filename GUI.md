@@ -629,4 +629,147 @@ Translates into the following slot table:
     Value       ...       
     EndGroup
 
+# Final answer to the state question
+
+The example: editing a list
+
+```rust
+
+pub type ItemList = Arc<Vec<Item>>;
+
+struct ItemCollection {
+    items: ItemList
+}
+
+#[composable]
+fn item_collection_editor() {
+    let mut list_state : State<Arc<Vec<Row>>> = Context::state(|| ...);
+    let mut row_widgets = vec![];
+    for row in list_state.get().iter() {
+        let r = row_editor(row);
+        row_widgets.push(r);
+    }
+    let add_item_button = Button::new("Add item");
+    let remove_item_button = Button::new("Remove item");
+    add_item_button.on_click(|| { list_state.set(list_state.get().clone().append(...)); });
+    // finally, update the state (if it has changed?)
+}
+
+// Just pass a mutable row - no need to bother with proxies or lenses or bindings.
+// We still need to detect changes to the row, so all types must be `Data`
+#[composable]
+fn row_editor(row: &mut Row) -> Widget {
+    // do something with row
+}
+```
+
+```rust
+#[composable]
+struct ItemCollectionEditor {
+    #[state] items: ItemList,   // State<ItemList>
+}
+
+#[composable]
+struct RowEditor {
+    #[binding] row: Row,        // Binding<Row>
+}
+
+impl RowEditor {
+    pub fn render(&mut self) -> Widget {
+        
+    } 
+}
+
+
+```
+
+Issues:
+1. passing bits of state to child composables:
+
+```rust
+fn list_editor() {
+    let mut list_state : State<Arc<Vec<Row>>> = Context::state(|| ...);
+    
+    let mut row_widgets = vec![];
+    for row in list_state.get().iter() {
+        let r = row_editor(row);
+        row_widgets.push(r);
+    }
+    
+    let add_item_button = Button::new("Add item");
+    let remove_item_button = Button::new("Remove item");
+    
+    // issue: must clone list_state in the closure, which is annoying
+    add_item_button.on_click(|| { list_state.set(list_state.get().clone().append(...)); });
+}
+
+with_state::<ItemCollection>(list_editor);
+
+fn row_editor(row: &Row) -> (Widget, Row) {
+}
+
+
+```
+
+Options:
+
+1. State mutation happens during composition
+   
+2. State mutation happens during event propagation, in event callbacks
+    - complicated: what if we want to edit a smaller part of a bigger structure?
+    - swiftui: `@Binding`, which uses f*cking lenses under the hood (writablekeypath)
+    - do we need lenses after all?
+        - if we use lenses now, we might as well use druid's approach directly: it's cleaner and more principled
+        - just use some macro magic on top to make lens composition more palatable
+
+
+# External state
+Two kinds of state:
+- state that is accessed only during recomp: most of the state
+    - not too complicated
+- state that can be accessed and written outside of recomp (e.g. during event propagation) and that can invalidate values in the cache 
+
+
+# The great UI challenges:
+1. (Non-cloneability/minimally invasive) Allowing mutable state that does not need to be `Clone`
+    1. (Non-comparability) Allowing mutable state that does not need to be `Data` (comparable)
+2. (Lensing state) Views that access/mutate only parts of a bigger state
+3. (Identity) Retaining widget identity
+4. (Targeted events) Sending events to specific widgets in the tree efficiently
+5. (Declarative) Express the UI declaratively, the user shouldn't have to write imperative code to update the UI structures.
+6. (Incrementality) Rebuild only what's necessary on UI changes.
+7. (Tooling) Plays well with existing tooling, such as IDE autocompletion
+    - macro / DSL based solutions are suboptimal
+    - stuff that only uses existing syntax is preferred
+8. (Extensibility) Make it easy to create new widgets.
+9. (Internal state) Components/views can have private retained internal state
+
+=> avoid solutions that create more challenges!
+
+
+Strategies to handle state modification:
+
+1. watch how the state is modified and update the view accordingly: `dF(dState) -> dView; View += dView`
+    1.1 restrict the ways the user can modify the state to primitives that the framework understands, 
+        but let the user choose their own data model types (Vec, etc.), provided the framework knows how to modify them (unintrusive)
+    1.2 the framework provides observable collection types that must be used in the data model (intrusive)
+   
+2. diff the state after it is modified and update the view from this diff: 
+   - update: `dF(State(t+dt) - State(t)) -> dView; View += dView`
+   - rebuild: `if State(t+dt) != State(t) then View = F(State(t+dt)) else View = F(State(t))`
+   
+3. don't watch the state, but instead watch the produced view and diff it with the retained view: `dView = F(State(t+dt)) - F(State(t)); View += dView`
+    - rare? 
+   
+
+Strategy 1 is closer to building an incremental function; but like automatic differentiation, it's not possible for arbitrary functions:
+- simple list-to-list mapping: easy
+- list-to-list mapping with conditionals: OK
+
+## Decision: continue with strategy 2.2 (Caching) or try strategy 1 (Reactive)?
+The main difference is that caching needs comparable data models to be effective, while reactive can work with any data model.
+However, caching may be able to represent more complex datamodel->view transformations, and is less restrictive on 
+how the data model can be updated.
+Reactive needs compiler support (through a macroDSL which will most likely prevent all IDE autocompletion), while caching can work with minimal macros.
+(Quoting Raph Levien on zulip: "how can you express UI using fairly vanilla language constructs?")
 

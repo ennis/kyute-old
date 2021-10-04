@@ -14,9 +14,12 @@ use kyute_shell::{
 use std::{sync::Arc, time::Instant};
 use tracing::trace_span;
 use crate::composable;
+//use crate::context::State;
+use kyute_shell::winit::window::WindowBuilder;
 
 struct WindowState {
-    window: PlatformWindow,
+    window: Option<PlatformWindow>,
+    window_builder: Option<WindowBuilder>,
     //pointer_grab: Option<WeakWidgetRef>,
     //hot: Option<WeakWidgetRef>,
     inputs: InputState,
@@ -27,58 +30,48 @@ struct WindowState {
 
 /// A window managed by kyute.
 pub struct Window {
-    window_state: Arc<WindowState>,
+    //window_state: State<WindowState>,
     children: Vec<Widget>,
 }
 
 impl Window {
     #[composable(uncached)]
     pub fn new(
-        window_builder: winit::window::WindowBuilder,
+        window_builder: WindowBuilder,
         children: Vec<Widget>,
     ) -> Widget<Window> {
 
-        // retained widget state
-        let widget_state = WidgetState {};
+        // retained widget state: you need one to build a widget;
+        // it's also how you respond to events
+        let mut widget_state = Context::state(move || WidgetState::new());  // StateCell<WindowState>
 
         // create the window (called only once)
-        /*let window_state = Context::cache((), move |_| {
-            // FIXME: parent window?
-            // FIXME: we cannot create the window here: due to winit's design,
-            // the event loop cannot be accessed in `'static` contexts (we must use &EventLoopWindowTarget, which
-            // has a closure-bound unique lifetime).
-            //
-            // Solutions:
-            // 1. delay the creation of the window: `WidgetDelegate::mount(&AppCtx)`?
-            //
-            let window =
-                PlatformWindow::new(Platform::instance().event_loop(), window_builder, None)
-                    .unwrap();
-            let ws = WindowState {
-                window,
-                //pointer_grab: None,
-                //hot: None,
+        /*let mut window_state = Context::state(move || {
+            WindowState {
+                window: None,
+                window_builder: Some(window_builder),
                 inputs: Default::default(),
                 scale_factor: 0.0,
                 invalid: Default::default(),
                 needs_layout: false,
-            };
+            }
+        }); // StateCell<WindowState>*/
 
-            Arc::new(ws)
-        });*/
+        // full mutable access to widget_state here: handle events, etc.
+        // full mutable access to window_state here: update it or whatever
 
-        // FIXME: update window properties
+        /*let widget_state = widget_state.commit(); // convert to State<...>
+        let window_state = window_state.commit();*/
 
-        todo!()
-
-        /*// TODO update window state from parameters
-        Widget::new(
-            widget_state,
+        /*Widget::new(
+            widget_state.into(),        // writes back the
             Window {
-                window_state,
+               // window_state: window_state.into(),
                 children,
             },
         )*/
+
+        todo!()
     }
 }
 
@@ -87,13 +80,17 @@ impl WidgetDelegate for Window {
         std::any::type_name::<Self>()
     }
 
+    /*fn mount(&self, app_ctx: &mut AppCtx) {
+
+    }*/
+
     fn layout(
         &self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
         env: &Environment,
     ) -> LayoutItem {
-        let (width, height): (f64, f64) = self.window_state.window.window().inner_size().into();
+        /*let (width, height): (f64, f64) = self.window_state.window.window().inner_size().into();
 
         let layouts: Vec<_> = self
             .children
@@ -106,7 +103,8 @@ impl WidgetDelegate for Window {
             })
             .collect();
 
-        LayoutItem::with_children(Measurements::new(Size::new(width, height)), layouts)
+        LayoutItem::with_children(Measurements::new(Size::new(width, height)), layouts)*/
+        todo!()
     }
 
     fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {

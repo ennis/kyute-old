@@ -1,4 +1,5 @@
 use crate::{call_key::CallKey, data::Data};
+use slotmap::SlotMap;
 use std::{
     any::{Any, TypeId},
     cell::{Cell, RefCell},
@@ -21,7 +22,7 @@ use tracing::trace;
 // - it's important that the lookup be fast
 
 slotmap::new_key_type! {
-    pub struct CacheEntryKey;
+    pub struct ValueEntryKey;
 }
 
 /// Error related to state entries.
@@ -42,30 +43,31 @@ pub enum CacheEntryError {
 pub struct CacheEntryIndex(usize);
 
 /// Internal cache entry.
-struct CacheEntry<T: ?Sized> {
+struct ValueEntry<T: ?Sized> {
     /// Relative position of the parent entry, or 0 if this is a root entry.
     parent: i32,
+    pub(crate) key: Option<ValueEntryKey>,
     occupied: bool,
     type_id: std::any::TypeId,
     location: Option<&'static Location<'static>>,
     value: ManuallyDrop<T>,
 }
 
-impl<T: Any> CacheEntry<T> {
-    /// Creates a new cache entry.
+impl<T: Any> ValueEntry<T> {
+    /*/// Creates a new cache entry.
     fn new(
         parent: i32,
         initial_value: T,
         location: Option<&'static Location<'static>>,
-    ) -> CacheEntry<T> {
-        CacheEntry {
+    ) -> ValueEntry<T> {
+        ValueEntry {
             parent,
             occupied: true,
             type_id: std::any::TypeId::of::<T>(),
             location,
             value: ManuallyDrop::new(initial_value),
         }
-    }
+    }*/
 
     fn get(&self) -> Option<&T> {
         if self.occupied {
@@ -116,25 +118,25 @@ impl<T: Any> CacheEntry<T> {
     }
 }
 
-impl CacheEntry<dyn Any> {
-    pub fn downcast<T: Any>(&self) -> Option<&CacheEntry<T>> {
+impl ValueEntry<dyn Any> {
+    pub fn downcast<T: Any>(&self) -> Option<&ValueEntry<T>> {
         if self.type_id == std::any::TypeId::of::<T>() {
-            unsafe { Some(&*(self as *const CacheEntry<dyn Any> as *const CacheEntry<T>)) }
+            unsafe { Some(&*(self as *const ValueEntry<dyn Any> as *const ValueEntry<T>)) }
         } else {
             None
         }
     }
 
-    pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut CacheEntry<T>> {
+    pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut ValueEntry<T>> {
         if self.type_id == std::any::TypeId::of::<T>() {
-            unsafe { Some(&mut *(self as *mut CacheEntry<dyn Any> as *mut CacheEntry<T>)) }
+            unsafe { Some(&mut *(self as *mut ValueEntry<dyn Any> as *mut ValueEntry<T>)) }
         } else {
             None
         }
     }
 }
 
-impl<T: ?Sized> Drop for CacheEntry<T> {
+impl<T: ?Sized> Drop for ValueEntry<T> {
     fn drop(&mut self) {
         if self.occupied {
             self.occupied = false;
@@ -157,7 +159,7 @@ enum Slot {
     /// Marks the end of a scope.
     EndGroup,
     /// Holds a piece of state.
-    State(Box<CacheEntry<dyn Any>>),
+    Value(Box<ValueEntry<dyn Any>>),
 }
 
 impl Slot {
@@ -174,76 +176,9 @@ impl Slot {
     }
 }
 
-/*pub struct Cache {
-    /// Vector of cache entries. They follow the order in which they are created during composition.
-    slots: Vec<Slot>,
-}
-
-impl Cache {
-    pub fn new() -> Cache {
-        Cache {
-            slots: RefCell::new(Default::default()),
-        }
-    }
-
-    /// Recursively marks this entry and its parents as dirty.
-    fn dirty_entry_recursive(&self, key: CallKey) {
-        let entries = self.slots.borrow();
-        let entry = entries.get(&key).unwrap();
-        entry.dirty.set(true);
-        if let Some(parent) = entry.parent {
-            self.dirty_entry_recursive(parent)
-        }
-    }
-
-    pub(crate) fn dump(&self) {
-        eprintln!("====== Cache entries: ======");
-        for (key, entry) in self.slots.borrow().iter() {
-            if let Some(location) = entry.location {
-                eprintln!("- [{}]({:?}) - parent: {:?}", location, key, entry.parent);
-            } else {
-                eprintln!("- {:?} - parent: {:?}", key, entry.parent);
-            }
-        }
-    }
-
-    pub(crate) fn take_state<T: Any>(&self, key: CallKey) -> Result<Option<T>, CacheEntryError> {
-        let mut entries = self.slots.borrow_mut();
-        let mut entry = entries
-            .get_mut(&key)
-            .ok_or(CacheEntryError::EntryNotFound)?;
-        entry.take_value()
-    }
-
-    /// Replaces the value of a mutable state entry.
-    pub(crate) fn replace_state<T: Any>(
-        &self,
-        key: CallKey,
-        value: Option<T>,
-    ) -> Result<Option<T>, CacheEntryError> {
-        let mut entries = self.slots.borrow_mut();
-        let mut entry = entries
-            .get_mut(&key)
-            .ok_or(CacheEntryError::EntryNotFound)?;
-        let result = entry.replace_value(value);
-        if matches!(result, Ok(Some(_))) {
-            tracing::warn!("cache entry already contained a value");
-        }
-        result
-    }
-
-    pub fn into_writer(self) -> CacheWriter {
-        CacheWriter {
-            cache: self,
-            pos: 0,
-            group_start: None,
-            return_pos: vec![],
-        }
-    }
-}*/
-
 pub struct Cache {
     slots: Vec<Slot>,
+    mutable_values: SlotMap<ValueEntryKey, usize>,
     revision: usize,
 }
 
@@ -258,7 +193,46 @@ impl Cache {
                 },
                 Slot::EndGroup,
             ],
+            mutable_values: Default::default(),
             revision: 0,
+        }
+    }
+
+    pub fn value_mut<T: 'static>(&mut self, key: ValueEntryKey) -> &mut T {
+        let slot_index = *self
+            .mutable_values
+            .get(key)
+            .expect("invalid mutable value key");
+        match &mut self.slots[slot_index] {
+            Slot::Value(entry) => entry
+                .downcast_mut()
+                .expect("type mismatch")
+                .get_mut()
+                .expect("entry was vacant"),
+            _ => {
+                panic!("unexpected entry type")
+            }
+        }
+    }
+
+    fn mark_slot_dirty(&mut self, index: usize) {
+        match self.slots[index] {
+            Slot::StartGroup { ref mut dirty, parent, .. } => {
+                *dirty = true;
+                if parent < 0 {
+                    self.mark_slot_dirty((index as i32 + parent) as usize);
+                }
+            }
+            Slot::EndGroup => {}
+            Slot::Value(ref mut entry) => {
+                let parent = entry.parent;
+                if parent < 0 {
+                    self.mark_slot_dirty((index as i32 + parent) as usize);
+                }
+            }
+            _ => {
+                panic!("unexpected entry type")
+            }
         }
     }
 
@@ -275,23 +249,25 @@ impl Cache {
                 }
                 Slot::StartGroup { len, dirty, parent } => {
                     eprintln!(
-                        "{:3} StartGroup len={} (end={}) parent={} {}",
+                        "{:3} StartGroup len={} (end={}) parent={} ({}) {}",
                         i,
                         *len,
                         i + *len as usize - 1,
                         parent,
+                        i as i32 - parent,
                         if *dirty { "dirty" } else { "" }
                     )
                 }
                 Slot::EndGroup => {
                     eprintln!("{:3} EndGroup", i)
                 }
-                Slot::State(entry) => {
+                Slot::Value(entry) => {
                     eprintln!(
-                        "{:3} State      {:?} parent={} {}",
+                        "{:3} State      {:?} parent={} ({}) {}",
                         i,
                         entry.type_id,
                         entry.parent,
+                        i as i32 + entry.parent,
                         if entry.occupied { "" } else { "vacant" }
                     )
                 }
@@ -394,6 +370,20 @@ impl CacheWriter {
         }
     }
 
+    /*fn update_parent_group_offset(&mut self) {
+        let parent = self.parent_group_offset();
+        match &mut self.cache.slots[self.pos] {
+            Slot::Tag(_) => {}
+            Slot::StartGroup { parent: old_parent, .. } => {
+                *old_parent = parent;
+            }
+            Slot::EndGroup => {}
+            Slot::State(entry) => {
+                entry.parent = parent;
+            }
+        }
+    }*/
+
     pub fn start_group(&mut self, call_key: CallKey) {
         let tag_found = self.sync(call_key);
 
@@ -439,17 +429,11 @@ impl CacheWriter {
                     },
                 );
                 self.cache.slots.insert(self.pos + 1, Slot::EndGroup);
-                // enter group
-                self.group_stack.push(self.pos);
-                self.pos += 1;
             }
             Slot::StartGroup {
                 parent: old_parent, ..
             } => {
                 *old_parent = parent;
-                // enter group
-                self.group_stack.push(self.pos);
-                self.pos += 1;
             }
             _ => {
                 // inserting an untagged group: either the next element is the group we expect,
@@ -458,6 +442,10 @@ impl CacheWriter {
                 panic!("expected GroupStart or end of current group")
             }
         }
+
+        // enter group
+        self.group_stack.push(self.pos);
+        self.pos += 1;
     }
 
     pub fn dump(&self) {
@@ -517,7 +505,7 @@ impl CacheWriter {
                     panic!("unexpected EndGroup in skip")
                 }
                 Slot::Tag(_) => self.pos += 1,
-                Slot::State(_) => {
+                Slot::Value(_) => {
                     self.pos += 1;
                     break;
                 }
@@ -525,29 +513,30 @@ impl CacheWriter {
         }
     }
 
-    fn insert_value<T: 'static>(&mut self, value: T) -> usize {
+    fn insert_value<T: 'static>(&mut self, mutable: bool, value: T) -> (usize, T) {
         let pos = self.pos;
+        let key = if mutable {
+            Some(self.cache.mutable_values.insert(pos))
+        } else {
+            None
+        };
         self.cache.slots.insert(
             self.pos,
-            Slot::State(Box::new(CacheEntry::new(
-                self.parent_group_offset(),
-                value,
-                None,
-            ))),
+            Slot::Value(Box::new(ValueEntry {
+                parent: self.parent_group_offset(),
+                key,
+                occupied: true,
+                type_id: std::any::TypeId::of::<T>(),
+                location: None,
+                value: ManuallyDrop::new(value),
+            })),
         );
+        let entry = match &mut self.cache.slots[self.pos] {
+            Slot::Value(entry) => entry.downcast_mut().unwrap(),
+            _ => unreachable!(),
+        };
         self.pos += 1;
-        pos
-    }
-
-    fn insert_value_and_take<T: Any>(&mut self, value: T) -> (usize, T) {
-        let pos = self.pos;
-        let mut entry = CacheEntry::new(self.parent_group_offset(), value, None);
-        let value = entry.take_value().unwrap();
-        self.cache
-            .slots
-            .insert(self.pos, Slot::State(Box::new(entry)));
-        self.pos += 1;
-        (pos, value)
+        (pos, entry.take_value().unwrap())
     }
 
     pub fn tagged_compare_and_update_value<T: Data>(
@@ -558,7 +547,7 @@ impl CacheWriter {
         if self.sync(call_key) {
             self.compare_and_update_value(new_value)
         } else {
-            self.insert_value(new_value);
+            self.insert_value(false, new_value);
             true
         }
     }
@@ -566,7 +555,7 @@ impl CacheWriter {
     pub fn compare_and_update_value<T: Data>(&mut self, new_value: T) -> bool {
         let parent = self.parent_group_offset();
         match &mut self.cache.slots[self.pos] {
-            Slot::State(entry) => {
+            Slot::Value(entry) => {
                 entry.parent = parent;
                 let entry = entry.downcast_mut::<T>().expect("entry type mismatch");
                 let value = entry.get_mut().expect("expected occupied entry");
@@ -580,7 +569,7 @@ impl CacheWriter {
             }
             Slot::EndGroup => {
                 // insert entry
-                self.insert_value(new_value);
+                self.insert_value(false, new_value);
                 true
             }
             _ => {
@@ -590,22 +579,37 @@ impl CacheWriter {
         }
     }
 
+    // compare_and_update_value        : T -> bool
+    // take_value                      : (Fn() -> T) -> (usize, T)
+    // take_mutable_value              : (Fn() -> T) -> (MutableValueKey, T)
+    // tagged_compare_and_update_value : (CallKey, T) -> bool
+    // tagged_take_value               : (CallKey, Fn() -> T) -> (usize, T)
+    // tagged_take_mutable_value       : (CallKey, Fn() -> T) -> (MutableValueKey, T)
+    // start_group
+    // tagged_start_group
+    // end_group
+    //
+    // replace_value
+    // skip
+
+    // TODO:
     pub fn tagged_take_value<T: 'static>(
         &mut self,
         call_key: CallKey,
+        mutable: bool,
         init: impl FnOnce() -> T,
     ) -> (usize, T) {
         if self.sync(call_key) {
-            self.take_value(init)
+            self.take_value(mutable, init)
         } else {
-            self.insert_value_and_take(init())
+            self.insert_value(mutable, init())
         }
     }
 
-    pub fn take_value<T: 'static>(&mut self, init: impl FnOnce() -> T) -> (usize, T) {
+    pub fn take_value<T: 'static>(&mut self, mutable: bool, init: impl FnOnce() -> T) -> (usize, T) {
         let parent = self.parent_group_offset();
         match &mut self.cache.slots[self.pos] {
-            Slot::State(entry) => {
+            Slot::Value(entry) => {
                 entry.parent = parent;
                 let pos = self.pos;
                 let value = entry
@@ -616,7 +620,10 @@ impl CacheWriter {
                 self.pos += 1;
                 (pos, value)
             }
-            Slot::EndGroup => self.insert_value_and_take(init()),
+            Slot::EndGroup => {
+                let (pos, entry) = self.insert_value(mutable, init());
+                (pos, entry)
+            }
             _ => {
                 // not expecting anything else
                 panic!("unexpected slot type");
@@ -627,7 +634,7 @@ impl CacheWriter {
     pub fn replace_value<T: 'static>(&mut self, slot_index: usize, value: T) -> Option<T> {
         assert!(slot_index < self.pos);
         match &mut self.cache.slots[slot_index] {
-            Slot::State(entry) => entry
+            Slot::Value(entry) => entry
                 .downcast_mut::<T>()
                 .expect("entry type mismatch")
                 .replace_value(Some(value)),
@@ -811,7 +818,7 @@ mod tests {
         let mut cache = Cache::new();
         for i in 0..3 {
             let mut writer = CacheWriter::new(cache);
-            let (index, value) = writer.take_value(|| 0);
+            let (index, value) = writer.take_value(false, || 0);
             writer.tagged_compare_and_update_value(CallKey(0), 123);
             writer.dump();
             writer.replace_value(index, i);

@@ -145,6 +145,12 @@ pub struct WindowPaintCtx {}
 #[derive(Clone)]
 pub struct WidgetState {}
 
+impl WidgetState {
+    pub fn new() -> WidgetState {
+        WidgetState {}
+    }
+}
+
 pub struct WidgetInner<T: ?Sized> {
     // Widget retained state.
     //state: State<WidgetState>,
