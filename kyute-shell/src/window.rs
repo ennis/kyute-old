@@ -52,7 +52,7 @@ impl<'a> WindowDrawContext<'a> {
         let dpi = 96.0 * window.window.scale_factor() as f32;
 
         // create target bitmap
-        let mut bitmap = unsafe {
+        let bitmap = unsafe {
             let props = D2D1_BITMAP_PROPERTIES1 {
                 pixelFormat: D2D1_PIXEL_FORMAT {
                     format: DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM,
@@ -241,9 +241,6 @@ impl PlatformWindow {
                 .and_some(swap_chain)
                 .expect("failed to create swap chain")
         };
-
-        let hinstance = HINSTANCE(window.hinstance() as isize);
-        let hwnd = HWND(window.hwnd() as isize);
 
         let pw = PlatformWindow {
             window,

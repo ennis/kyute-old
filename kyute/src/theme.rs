@@ -6,7 +6,6 @@ use kyute_shell::drawing::{
 use palette::{Alpha, LinSrgb, LinSrgba, Shade, Srgb, Srgba};
 use crate::{SideOffsets, EnvKey};
 use kyute_shell::text::TextFormat;
-use std::sync::Arc;
 use crate::style::StyleSet;
 
 pub const FONT_SIZE: EnvKey<f64> = EnvKey::new("kyute.theme.font_size"); // [14.0];
@@ -46,7 +45,6 @@ pub const TEXT_EDIT_BORDER_WIDTH : EnvKey<f64> = EnvKey::new("kyute.theme.text_e
 pub const TEXT_COLOR : EnvKey<Color> = EnvKey::new("kyute.theme.text_color"); // [Color::new(0.96,0.96,0.96,1.0)];
 pub const SELECTED_TEXT_BACKGROUND_COLOR : EnvKey<Color> = EnvKey::new("kyute.theme.selected_text_background_color"); // [Color::new(0.6,0.6,0.8,1.0)];
 pub const SELECTED_TEXT_COLOR : EnvKey<Color> = EnvKey::new("kyute.theme.selected_text_color"); // [Color::new(1.0,1.0,1.0,1.0)];
-
 pub const DEFAULT_TEXT_FORMAT : EnvKey<TextFormat> = EnvKey::new("kyute.theme.text_format"); // [Color::new(1.0,1.0,1.0,1.0)];
 pub const BUTTON_STYLE : EnvKey<StyleSet> = EnvKey::new("kyute.theme.button_style");
 pub const SLIDER_KNOB_STYLE : EnvKey<StyleSet> = EnvKey::new("kyute.theme.slider_knob_style");

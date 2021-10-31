@@ -20,7 +20,6 @@ use crate::{
     },
     winit::event_loop::EventLoop,
 };
-use once_cell::sync::OnceCell;
 use palette::encoding::pixel::RawPixel;
 use std::{
     cell::RefCell,
@@ -31,12 +30,11 @@ use std::{
     ptr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::Duration,
 };
 use windows::Interface;
-use winit::event_loop::EventLoopWindowTarget;
 
 macro_rules! sync_com_ptr_wrapper {
     ($wrapper:ident ( $iface:ident ) ) => {
@@ -148,9 +146,6 @@ impl Platform {
     }
 
     fn new_impl() -> anyhow::Result<Platform> {
-        // --- Application event loop ---
-        let event_loop = EventLoop::new();
-
         // --- TODO Create the graal context (implying a vulkan instance and device)
 
         // FIXME technically we need the target surface so we can pick a device that can

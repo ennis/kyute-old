@@ -1,7 +1,6 @@
 use std::{
     collections::hash_map::DefaultHasher,
     fmt,
-    fmt::Formatter,
     hash::{Hash, Hasher},
     panic::Location,
 };

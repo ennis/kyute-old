@@ -8,7 +8,6 @@ fn gui(cx: &mut CompositionCtx) {
     use kyute::widget as w;
 
     // Using functions directly is a bit impractical in rust, because of the lack of optional parameters
-
     // returns a MutableState<f64>
 
     cx.with_environment(get_default_application_style(), |cx| {

@@ -1,18 +1,16 @@
-use crate::{data::Data, SideOffsets, Widget};
+use crate::{data::Data, SideOffsets};
 use kyute_shell::{
     drawing::Color,
     text::{TextFormat, TextLayout},
 };
 use std::{
-    any::{Any, TypeId},
-    borrow::Borrow,
+    any::Any,
     collections::HashMap,
-    fmt,
     hash::{Hash, Hasher},
     marker::PhantomData,
-    rc::Rc,
     sync::Arc,
 };
+use crate::style::StyleSet;
 //use crate::style::StyleSet;
 
 /// A type that identifies a named value in an [`Environment`], of a particular type `T`.
@@ -54,7 +52,7 @@ pub trait EnvValue: Sized + Any + Data {
 
 macro_rules! impl_env_value {
     ($t:ty) => {
-        impl EnvValue for $t {
+        impl $crate::EnvValue for $t {
             fn as_any(&self) -> &dyn Any {
                 self
             }
@@ -69,6 +67,7 @@ impl_env_value!(String);
 impl_env_value!(SideOffsets);
 impl_env_value!(TextFormat);
 impl_env_value!(TextLayout);
+impl_env_value!(StyleSet);
 
 impl<T: Any> EnvValue for Arc<T> {
     fn as_any(&self) -> &dyn Any {

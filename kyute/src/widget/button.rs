@@ -1,43 +1,48 @@
-use crate::{align_boxes, core2::{EventCtx, LayoutCtx, PaintCtx, WidgetState}, event::PointerEventKind, widget::Text, Alignment, BoxConstraints, Environment, Event, Measurements, Rect, SideOffsets, Size, Widget, WidgetDelegate, LayoutItem};
-use kyute_macros::composable;
+use crate::{align_boxes, core2::{EventCtx, LayoutCtx, PaintCtx, WidgetPod}, event::PointerEventKind, widget::Text, Alignment, BoxConstraints, Environment, Event, Measurements, Model, Rect, SideOffsets, Size, Widget, UpdateCtx};
 use kyute_shell::drawing::{Brush, Color};
 use std::convert::TryFrom;
+use crate::event::LifecycleEvent;
 
-#[derive(Clone)]
-pub struct Button {
-    label: Text,
-    //action_queue: ActionQueue<ButtonAction>,
+pub struct Button<T> {
+    label_text: String,
+    label: WidgetPod<String, Text>,
+    on_click: Option<Box<dyn Fn(&mut EventCtx, &mut T)>>,
 }
 
-impl Button {
-    #[composable(uncached)]
-    pub fn new(label: impl Into<String>) -> Widget<Button> {
-        let state = WidgetState {};
-        todo!()
+impl<T> Button<T> {
+    pub fn new(label_text: impl Into<String>) -> Button<T> {
+        Button {
+            label_text: label_text.into(),
+            label: WidgetPod::new(Text::new()),
+            on_click: None,
+        }
     }
 }
 
-impl Widget<Button> {}
+impl<T: Model> Widget<T> for Button<T> {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut T) -> Option<T::Change> {
+        None
+    }
 
-pub enum ButtonAction {
-    Clicked,
-}
-
-impl WidgetDelegate for Button {
-
+    fn lifecycle(&mut self, ctx: &mut EventCtx, lifecycle_event: &LifecycleEvent, data: &T) {
+        self.label.lifecycle(ctx, lifecycle_event, &self.label_text);
+    }
 
     fn layout(
-        &self,
+        &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
+        _data: &T,
         env: &Environment,
-    ) -> LayoutItem {
+    ) -> Measurements {
         // measure the label inside
         let padding = SideOffsets::new_all_same(4.0);
         let content_constraints = constraints.deflate(&padding);
 
-        let label_layout = self.label.layout(ctx, content_constraints, env);
-        let mut measurements = label_layout.measurements();
+        let label_measurements = self
+            .label
+            .layout(ctx, content_constraints, &self.label_text, env);
+        let mut measurements = label_measurements;
 
         // add padding on the sides
         measurements.size += Size::new(padding.horizontal(), padding.vertical());
@@ -50,15 +55,10 @@ impl WidgetDelegate for Button {
         measurements.size = constraints.constrain(measurements.size);
 
         // center the text inside the button
-        let offset = align_boxes(
-            Alignment::CENTER,
-            &mut measurements,
-            label_layout.measurements(),
-        );
+        let offset = align_boxes(Alignment::CENTER, &mut measurements, label_measurements);
 
-        let mut li = LayoutItem::new(measurements);
-        li.add_child(offset, label_layout);
-        li
+        self.label.set_child_offset(offset);
+        measurements
     }
 
     fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {

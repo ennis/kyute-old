@@ -10,11 +10,11 @@ use crate::{
         brush::Brush, mk_color_f, mk_matrix_3x2, mk_point_f, mk_rect_f, Color, PathGeometry, Point,
         Rect, Transform,
     },
-    platform::D2D1DeviceContext,
+    //platform::D2D1DeviceContext,
     text::TextLayout,
 };
 use bitflags::bitflags;
-use std::{mem::MaybeUninit, sync::MutexGuard};
+use std::mem::MaybeUninit;
 use tracing::error;
 use windows::Interface;
 

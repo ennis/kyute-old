@@ -22,6 +22,8 @@ use quote::{ToTokens, TokenStreamExt};
 
 mod composable;
 mod data;
+mod model;
+mod view;
 
 //--------------------------------------------------------------------------------------------------
 struct CrateName;
@@ -33,17 +35,37 @@ impl ToTokens for CrateName {
     }
 }
 
+fn ident_from_str(s: &str) -> proc_macro2::Ident {
+    proc_macro2::Ident::new(s, proc_macro2::Span::call_site())
+}
+
 //--------------------------------------------------------------------------------------------------
 /*#[proc_macro_derive(Data, attributes(argument))]
 pub fn data_derive(input: TokenStream) -> TokenStream {
   data::derive(input)
 }*/
 
+#[proc_macro]
+pub fn view(contents: TokenStream) -> TokenStream {
+    view::generate_view(contents)
+}
+
 //--------------------------------------------------------------------------------------------------
 #[proc_macro_attribute]
 pub fn composable(attr: TokenStream, item: TokenStream) -> TokenStream {
     composable::generate_composable(attr, item)
 }
+
+//--------------------------------------------------------------------------------------------------
+#[proc_macro_derive(Model, attributes(model))]
+pub fn derive_model(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    model::derive_model_impl(input)
+        .unwrap_or_else(|err| err.to_compile_error())
+        .into()
+}
+
+//--------------------------------------------------------------------------------------------------
 
 // Originally part of druid.
 /// Generates implementations of the `Data` trait.

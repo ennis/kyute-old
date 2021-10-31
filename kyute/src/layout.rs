@@ -5,8 +5,6 @@ use std::{
     hash::{Hash, Hasher},
     ops::{Bound, RangeBounds},
 };
-use std::sync::Arc;
-use kyute_shell::drawing::Rect;
 
 /// Box constraints.
 #[derive(Copy, Clone)]
@@ -248,69 +246,5 @@ impl Measurements {
 impl From<Size> for Measurements {
     fn from(s: Size) -> Self {
         Measurements::new(s)
-    }
-}
-
-
-#[derive(Clone)]
-struct LayoutItemImpl {
-    measurements: Measurements,
-    children: Vec<(Offset, LayoutItem)>,
-}
-
-/// Represents the visual layout of a widget subtree.
-#[derive(Clone)]
-pub struct LayoutItem(Arc<LayoutItemImpl>);
-
-impl fmt::Debug for LayoutItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{:?}", self.0.measurements)
-    }
-}
-
-impl LayoutItem {
-    pub fn new(measurements: Measurements) -> LayoutItem {
-        LayoutItem(Arc::new(LayoutItemImpl {
-            measurements,
-            children: vec![],
-        }))
-    }
-
-    pub fn with_children(measurements: Measurements, children: Vec<(Offset,LayoutItem)>) -> LayoutItem {
-        LayoutItem(Arc::new(LayoutItemImpl {
-            measurements,
-            children,
-        }))
-    }
-
-    pub fn add_child(&mut self, offset: Offset, item: LayoutItem) {
-        Arc::make_mut(&mut self.0).children.push((offset, item));
-    }
-
-    pub fn size(&self) -> Size {
-        self.0.measurements.size
-    }
-
-    pub fn measurements(&self) -> Measurements {
-        self.0.measurements
-    }
-
-    pub fn baseline(&self) -> Option<f64> {
-        self.0.measurements.baseline
-    }
-
-    pub fn bounds(&self) -> Rect {
-        Rect::new(Point::origin(), self.0.measurements.size)
-    }
-
-    pub fn children(&self) -> &[(Offset, LayoutItem)] {
-        &self.0.children
-    }
-
-    pub fn child(&self, at: usize) -> Option<LayoutItem> {
-        self.0
-            .children
-            .get(at)
-            .map(|(offset, layout)| layout.clone())
     }
 }

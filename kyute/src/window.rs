@@ -1,134 +1,706 @@
 use crate::{
-    core2::WidgetState, event::InputState, region::Region, BoxConstraints, Context, Environment,
-    Event, EventCtx, LayoutCtx, LayoutItem, Measurements, Offset, PaintCtx, Rect, Size, Widget,
-    WidgetDelegate,
+    align_boxes,
+    application::AppCtx,
+    core2::{WidgetId, WidgetPod},
+    event::{InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind},
+    region::Region,
+    Alignment, BoxConstraints, Environment, Event, EventCtx, InternalEvent, LayoutCtx,
+    Measurements, Model, PaintCtx, PhysicalSize, Point, Rect, Size, Widget,
 };
 use keyboard_types::KeyState;
 use kyute_shell::{
-    drawing::Color,
     platform::Platform,
     window::{PlatformWindow, WindowDrawContext},
     winit,
-    winit::event::{DeviceId, VirtualKeyCode, WindowEvent},
+    winit::{
+        event::{DeviceId, VirtualKeyCode, WindowEvent},
+        window::WindowBuilder,
+    },
 };
-use std::{sync::Arc, time::Instant};
-use tracing::trace_span;
-use crate::composable;
-//use crate::context::State;
-use kyute_shell::winit::window::WindowBuilder;
+use std::time::Instant;
+use tracing::{trace, trace_span};
+use crate::event::LifecycleEvent;
+
+fn key_code_from_winit(
+    input: &winit::event::KeyboardInput,
+) -> (keyboard_types::Key, keyboard_types::Code) {
+    use keyboard_types::{Code, Key};
+    let code = match input.scancode {
+        0x0029 => Code::Backquote,
+        0x002B => Code::Backslash,
+        0x000E => Code::Backspace,
+        0x001A => Code::BracketLeft,
+        0x001B => Code::BracketRight,
+        0x0033 => Code::Comma,
+        0x000B => Code::Digit0,
+        0x0002 => Code::Digit1,
+        0x0003 => Code::Digit2,
+        0x0004 => Code::Digit3,
+        0x0005 => Code::Digit4,
+        0x0006 => Code::Digit5,
+        0x0007 => Code::Digit6,
+        0x0008 => Code::Digit7,
+        0x0009 => Code::Digit8,
+        0x000A => Code::Digit9,
+        0x000D => Code::Equal,
+        0x0056 => Code::IntlBackslash,
+        0x0073 => Code::IntlRo,
+        0x007D => Code::IntlYen,
+        0x001E => Code::KeyA,
+        0x0030 => Code::KeyB,
+        0x002E => Code::KeyC,
+        0x0020 => Code::KeyD,
+        0x0012 => Code::KeyE,
+        0x0021 => Code::KeyF,
+        0x0022 => Code::KeyG,
+        0x0023 => Code::KeyH,
+        0x0017 => Code::KeyI,
+        0x0024 => Code::KeyJ,
+        0x0025 => Code::KeyK,
+        0x0026 => Code::KeyL,
+        0x0032 => Code::KeyM,
+        0x0031 => Code::KeyN,
+        0x0018 => Code::KeyO,
+        0x0019 => Code::KeyP,
+        0x0010 => Code::KeyQ,
+        0x0013 => Code::KeyR,
+        0x001F => Code::KeyS,
+        0x0014 => Code::KeyT,
+        0x0016 => Code::KeyU,
+        0x002F => Code::KeyV,
+        0x0011 => Code::KeyW,
+        0x002D => Code::KeyX,
+        0x0015 => Code::KeyY,
+        0x002C => Code::KeyZ,
+        0x000C => Code::Minus,
+        0x0034 => Code::Period,
+        0x0028 => Code::Quote,
+        0x0027 => Code::Semicolon,
+        0x0035 => Code::Slash,
+        0x0038 => Code::AltLeft,
+        0xE038 => Code::AltRight,
+        0x003A => Code::CapsLock,
+        0xE05D => Code::ContextMenu,
+        0x001D => Code::ControlLeft,
+        0xE01D => Code::ControlRight,
+        0x001C => Code::Enter,
+        0xE05B => Code::Super,
+        0xE05C => Code::Super,
+        0x002A => Code::ShiftLeft,
+        0x0036 => Code::ShiftRight,
+        0x0039 => Code::Space,
+        0x000F => Code::Tab,
+        0x0079 => Code::Convert,
+        0x0072 => Code::Lang1,
+        0xE0F2 => Code::Lang1,
+        0x0071 => Code::Lang2,
+        0xE0F1 => Code::Lang2,
+        0x0070 => Code::KanaMode,
+        0x007B => Code::NonConvert,
+        0xE053 => Code::Delete,
+        0xE04F => Code::End,
+        0xE047 => Code::Home,
+        0xE052 => Code::Insert,
+        0xE051 => Code::PageDown,
+        0xE049 => Code::PageUp,
+        0xE050 => Code::ArrowDown,
+        0xE04B => Code::ArrowLeft,
+        0xE04D => Code::ArrowRight,
+        0xE048 => Code::ArrowUp,
+        0xE045 => Code::NumLock,
+        0x0052 => Code::Numpad0,
+        0x004F => Code::Numpad1,
+        0x0050 => Code::Numpad2,
+        0x0051 => Code::Numpad3,
+        0x004B => Code::Numpad4,
+        0x004C => Code::Numpad5,
+        0x004D => Code::Numpad6,
+        0x0047 => Code::Numpad7,
+        0x0048 => Code::Numpad8,
+        0x0049 => Code::Numpad9,
+        0x004E => Code::NumpadAdd,
+        0x007E => Code::NumpadComma,
+        0x0053 => Code::NumpadDecimal,
+        0xE035 => Code::NumpadDivide,
+        0xE01C => Code::NumpadEnter,
+        0x0059 => Code::NumpadEqual,
+        0x0037 => Code::NumpadMultiply,
+        0x004A => Code::NumpadSubtract,
+        0x0001 => Code::Escape,
+        0x003B => Code::F1,
+        0x003C => Code::F2,
+        0x003D => Code::F3,
+        0x003E => Code::F4,
+        0x003F => Code::F5,
+        0x0040 => Code::F6,
+        0x0041 => Code::F7,
+        0x0042 => Code::F8,
+        0x0043 => Code::F9,
+        0x0044 => Code::F10,
+        0x0057 => Code::F11,
+        0x0058 => Code::F12,
+        0xE037 => Code::PrintScreen,
+        0x0054 => Code::PrintScreen,
+        0x0046 => Code::ScrollLock,
+        0x0045 => Code::Pause,
+        0xE046 => Code::Pause,
+        0xE06A => Code::BrowserBack,
+        0xE066 => Code::BrowserFavorites,
+        0xE069 => Code::BrowserForward,
+        0xE032 => Code::BrowserHome,
+        0xE067 => Code::BrowserRefresh,
+        0xE065 => Code::BrowserSearch,
+        0xE068 => Code::BrowserStop,
+        0xE06B => Code::LaunchApp1,
+        0xE021 => Code::LaunchApp2,
+        0xE06C => Code::LaunchMail,
+        0xE022 => Code::MediaPlayPause,
+        0xE06D => Code::MediaSelect,
+        0xE024 => Code::MediaStop,
+        0xE019 => Code::MediaTrackNext,
+        0xE010 => Code::MediaTrackPrevious,
+        0xE05E => Code::Power,
+        0xE02E => Code::AudioVolumeDown,
+        0xE020 => Code::AudioVolumeMute,
+        0xE030 => Code::AudioVolumeUp,
+        _ => Code::Unidentified,
+    };
+
+    let key = if let Some(vk) = input.virtual_keycode {
+        match vk {
+            VirtualKeyCode::Key1 => Key::Unidentified,
+            VirtualKeyCode::Key2 => Key::Unidentified,
+            VirtualKeyCode::Key3 => Key::Unidentified,
+            VirtualKeyCode::Key4 => Key::Unidentified,
+            VirtualKeyCode::Key5 => Key::Unidentified,
+            VirtualKeyCode::Key6 => Key::Unidentified,
+            VirtualKeyCode::Key7 => Key::Unidentified,
+            VirtualKeyCode::Key8 => Key::Unidentified,
+            VirtualKeyCode::Key9 => Key::Unidentified,
+            VirtualKeyCode::Key0 => Key::Unidentified,
+            VirtualKeyCode::A => Key::Unidentified,
+            VirtualKeyCode::B => Key::Unidentified,
+            VirtualKeyCode::C => Key::Unidentified,
+            VirtualKeyCode::D => Key::Unidentified,
+            VirtualKeyCode::E => Key::Unidentified,
+            VirtualKeyCode::F => Key::Unidentified,
+            VirtualKeyCode::G => Key::Unidentified,
+            VirtualKeyCode::H => Key::Unidentified,
+            VirtualKeyCode::I => Key::Unidentified,
+            VirtualKeyCode::J => Key::Unidentified,
+            VirtualKeyCode::K => Key::Unidentified,
+            VirtualKeyCode::L => Key::Unidentified,
+            VirtualKeyCode::M => Key::Unidentified,
+            VirtualKeyCode::N => Key::Unidentified,
+            VirtualKeyCode::O => Key::Unidentified,
+            VirtualKeyCode::P => Key::Unidentified,
+            VirtualKeyCode::Q => Key::Unidentified,
+            VirtualKeyCode::R => Key::Unidentified,
+            VirtualKeyCode::S => Key::Unidentified,
+            VirtualKeyCode::T => Key::Unidentified,
+            VirtualKeyCode::U => Key::Unidentified,
+            VirtualKeyCode::V => Key::Unidentified,
+            VirtualKeyCode::W => Key::Unidentified,
+            VirtualKeyCode::X => Key::Unidentified,
+            VirtualKeyCode::Y => Key::Unidentified,
+            VirtualKeyCode::Z => Key::Unidentified,
+            VirtualKeyCode::Escape => Key::Escape,
+            VirtualKeyCode::F1 => Key::F1,
+            VirtualKeyCode::F2 => Key::F2,
+            VirtualKeyCode::F3 => Key::F3,
+            VirtualKeyCode::F4 => Key::F4,
+            VirtualKeyCode::F5 => Key::F5,
+            VirtualKeyCode::F6 => Key::F6,
+            VirtualKeyCode::F7 => Key::F7,
+            VirtualKeyCode::F8 => Key::F8,
+            VirtualKeyCode::F9 => Key::F9,
+            VirtualKeyCode::F10 => Key::F10,
+            VirtualKeyCode::F11 => Key::F11,
+            VirtualKeyCode::F12 => Key::F12,
+            VirtualKeyCode::Pause => Key::Pause,
+            VirtualKeyCode::Insert => Key::Insert,
+            VirtualKeyCode::Home => Key::Home,
+            VirtualKeyCode::Delete => Key::Delete,
+            VirtualKeyCode::End => Key::End,
+            VirtualKeyCode::PageDown => Key::PageDown,
+            VirtualKeyCode::PageUp => Key::PageUp,
+            VirtualKeyCode::Left => Key::ArrowLeft,
+            VirtualKeyCode::Up => Key::ArrowUp,
+            VirtualKeyCode::Right => Key::ArrowRight,
+            VirtualKeyCode::Down => Key::ArrowDown,
+            VirtualKeyCode::Return => Key::Enter,
+            VirtualKeyCode::Space => Key::Unidentified,
+            VirtualKeyCode::Compose => Key::Compose,
+            VirtualKeyCode::Caret => Key::Unidentified,
+            VirtualKeyCode::Numlock => Key::NumLock,
+            VirtualKeyCode::Numpad0 => Key::Unidentified,
+            VirtualKeyCode::Numpad1 => Key::Unidentified,
+            VirtualKeyCode::Numpad2 => Key::Unidentified,
+            VirtualKeyCode::Numpad3 => Key::Unidentified,
+            VirtualKeyCode::Numpad4 => Key::Unidentified,
+            VirtualKeyCode::Numpad5 => Key::Unidentified,
+            VirtualKeyCode::Numpad6 => Key::Unidentified,
+            VirtualKeyCode::Numpad7 => Key::Unidentified,
+            VirtualKeyCode::Numpad8 => Key::Unidentified,
+            VirtualKeyCode::Numpad9 => Key::Unidentified,
+            VirtualKeyCode::Backslash => Key::Unidentified,
+            VirtualKeyCode::Capital => Key::Unidentified,
+            VirtualKeyCode::Colon => Key::Unidentified,
+            VirtualKeyCode::Comma => Key::Unidentified,
+            VirtualKeyCode::Convert => Key::Convert,
+            VirtualKeyCode::Decimal => Key::Unidentified,
+            VirtualKeyCode::Divide => Key::Unidentified,
+            VirtualKeyCode::Equals => Key::Unidentified,
+            VirtualKeyCode::Grave => Key::Unidentified,
+            VirtualKeyCode::Kana => Key::KanaMode,
+            VirtualKeyCode::Kanji => Key::KanjiMode,
+            VirtualKeyCode::LAlt => Key::Alt,
+            VirtualKeyCode::LBracket => Key::Unidentified,
+            VirtualKeyCode::LControl => Key::Control,
+            VirtualKeyCode::LShift => Key::Shift,
+            VirtualKeyCode::LWin => Key::Super,
+            VirtualKeyCode::Mail => Key::LaunchMail,
+            VirtualKeyCode::MediaSelect => Key::Unidentified,
+            VirtualKeyCode::MediaStop => Key::MediaStop,
+            VirtualKeyCode::Minus => Key::Unidentified,
+            VirtualKeyCode::Multiply => Key::Unidentified,
+            VirtualKeyCode::Mute => Key::AudioVolumeMute,
+            VirtualKeyCode::MyComputer => Key::Unidentified,
+            VirtualKeyCode::NavigateForward => Key::BrowserForward,
+            VirtualKeyCode::NavigateBackward => Key::BrowserBack,
+            VirtualKeyCode::NextTrack => Key::MediaTrackNext,
+            VirtualKeyCode::NoConvert => Key::NonConvert,
+            VirtualKeyCode::NumpadComma => Key::Unidentified,
+            VirtualKeyCode::NumpadEnter => Key::Enter,
+            VirtualKeyCode::Period => Key::Unidentified,
+            VirtualKeyCode::PlayPause => Key::MediaPlayPause,
+            VirtualKeyCode::Power => Key::Power,
+            VirtualKeyCode::PrevTrack => Key::MediaTrackPrevious,
+            VirtualKeyCode::RAlt => Key::Alt,
+            VirtualKeyCode::RBracket => Key::Unidentified,
+            VirtualKeyCode::RControl => Key::Control,
+            VirtualKeyCode::RShift => Key::Shift,
+            VirtualKeyCode::Semicolon => Key::Unidentified,
+            VirtualKeyCode::Slash => Key::Unidentified,
+            VirtualKeyCode::Sleep => Key::Unidentified,
+            VirtualKeyCode::Tab => Key::Tab,
+            VirtualKeyCode::VolumeDown => Key::AudioVolumeDown,
+            VirtualKeyCode::VolumeUp => Key::AudioVolumeUp,
+            VirtualKeyCode::Copy => Key::Copy,
+            VirtualKeyCode::Paste => Key::Paste,
+            VirtualKeyCode::Cut => Key::Cut,
+            VirtualKeyCode::Back => Key::Backspace,
+            _ => Key::Unidentified,
+        }
+    } else {
+        Key::Unidentified
+    };
+
+    (key, code)
+}
+
+/// Stores information about the last click (for double-click handling)
+struct LastClick {
+    device_id: DeviceId,
+    button: PointerButton,
+    position: Point,
+    time: Instant,
+    repeat_count: u32,
+}
 
 struct WindowState {
     window: Option<PlatformWindow>,
     window_builder: Option<WindowBuilder>,
-    //pointer_grab: Option<WeakWidgetRef>,
-    //hot: Option<WeakWidgetRef>,
+    focus: Option<WidgetId>,
+    pointer_grab: Option<WidgetId>,
+    hot: Option<WidgetId>,
     inputs: InputState,
+    last_click: Option<LastClick>,
     scale_factor: f64,
     invalid: Region,
     needs_layout: bool,
 }
 
-/// A window managed by kyute.
-pub struct Window {
-    //window_state: State<WindowState>,
-    children: Vec<Widget>,
+impl WindowState {
+    /// Window event processing.
+    fn process_window_event(
+        &mut self,
+        app_ctx: &mut AppCtx,
+        window_event: &winit::event::WindowEvent,
+    ) {
+        let _span = trace_span!("process_window_event", ?window_event).entered();
+
+        // ---------------------------------------
+        // Default window event processing: update scale factor, input states (pointer pos, keyboard mods).
+        // Some input events (pointer, keyboard) are also converted to normal events delivered
+        // to the widgets within the window.
+        let event = match window_event {
+            // don't send Character events for control characters
+            WindowEvent::ReceivedCharacter(c) if !c.is_control() => {
+                Some(Event::Keyboard(KeyboardEvent {
+                    state: KeyState::Down,
+                    key: keyboard_types::Key::Character(c.to_string()),
+                    code: keyboard_types::Code::Unidentified,
+                    location: keyboard_types::Location::Standard,
+                    modifiers: self.inputs.modifiers,
+                    // TODO
+                    repeat: false,
+                    is_composing: false,
+                }))
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                self.scale_factor = *scale_factor;
+                // TODO
+                None
+            }
+            WindowEvent::Resized(size) => {
+                if let Some(window) = self.window.as_mut() {
+                    window.resize(PhysicalSize::new(size.width as f64, size.height as f64));
+                    self.needs_layout = true;
+                } else {
+                    tracing::warn!("Resized event received but window has not been created");
+                }
+                None
+            }
+            WindowEvent::Focused(true) => {
+                // TODO
+                None
+            }
+            WindowEvent::Focused(false) => {
+                // TODO
+                None
+            }
+            WindowEvent::KeyboardInput {
+                device_id,
+                input,
+                is_synthetic,
+            } => {
+                let (key, code) = key_code_from_winit(&input);
+                Some(Event::Keyboard(KeyboardEvent {
+                    state: match input.state {
+                        winit::event::ElementState::Pressed => keyboard_types::KeyState::Down,
+                        winit::event::ElementState::Released => keyboard_types::KeyState::Up,
+                    },
+                    key,
+                    code,
+                    location: keyboard_types::Location::default(),
+                    modifiers: self.inputs.modifiers,
+                    repeat: false,
+                    is_composing: false,
+                }))
+            }
+            WindowEvent::ModifiersChanged(mods) => {
+                // TODO
+                //window_info.inputs.modifiers = mods;
+                None
+            }
+            WindowEvent::CursorMoved {
+                device_id,
+                position,
+                ..
+            } => {
+                let logical_position = Point::new(
+                    position.x * self.scale_factor,
+                    position.y * self.scale_factor,
+                );
+                let pointer_state = self.inputs.pointers.entry(*device_id).or_default();
+                pointer_state.position = logical_position;
+                Some(Event::Pointer(PointerEvent {
+                    kind: PointerEventKind::PointerMove,
+                    position: logical_position,
+                    window_position: logical_position,
+                    modifiers: self.inputs.modifiers,
+                    buttons: pointer_state.buttons,
+                    pointer_id: *device_id,
+                    button: None,
+                    repeat_count: 0,
+                }))
+            }
+            WindowEvent::CursorEntered { .. } => {
+                // TODO
+                None
+            }
+            WindowEvent::CursorLeft { .. } => {
+                // TODO
+                None
+            }
+            WindowEvent::MouseWheel { .. } => {
+                // TODO
+                None
+            }
+            WindowEvent::MouseInput {
+                device_id,
+                state,
+                button,
+                ..
+            } => {
+                let pointer_state = self.inputs.pointers.entry(*device_id).or_default();
+                let button = match button {
+                    winit::event::MouseButton::Left => PointerButton::LEFT,
+                    winit::event::MouseButton::Right => PointerButton::RIGHT,
+                    winit::event::MouseButton::Middle => PointerButton::MIDDLE,
+                    winit::event::MouseButton::Other(3) => PointerButton::X1,
+                    winit::event::MouseButton::Other(4) => PointerButton::X2,
+                    winit::event::MouseButton::Other(b) => PointerButton(*b as u16),
+                };
+                match state {
+                    winit::event::ElementState::Pressed => pointer_state.buttons.set(button),
+                    winit::event::ElementState::Released => pointer_state.buttons.reset(button),
+                };
+
+                let click_time = Instant::now();
+
+                // determine the repeat count (double-click, triple-click, etc.) for button down event
+                let repeat_count = match &mut self.last_click {
+                    Some(ref mut last)
+                        if last.device_id == *device_id
+                            && last.button == button
+                            && last.position == pointer_state.position
+                            && (click_time - last.time)
+                                < Platform::instance().double_click_time() =>
+                    {
+                        // same device, button, position, and within the platform specified double-click time
+                        match state {
+                            winit::event::ElementState::Pressed => {
+                                last.repeat_count += 1;
+                                last.repeat_count
+                            }
+                            winit::event::ElementState::Released => {
+                                // no repeat for release events (although that could be possible?),
+                                1
+                            }
+                        }
+                    }
+                    other => {
+                        // no match, reset
+                        match state {
+                            winit::event::ElementState::Pressed => {
+                                *other = Some(LastClick {
+                                    device_id: *device_id,
+                                    button,
+                                    position: pointer_state.position,
+                                    time: click_time,
+                                    repeat_count: 1,
+                                });
+                            }
+                            winit::event::ElementState::Released => {
+                                *other = None;
+                            }
+                        };
+                        1
+                    }
+                };
+
+                Some(Event::Pointer(PointerEvent {
+                    kind: match state {
+                        winit::event::ElementState::Pressed => PointerEventKind::PointerDown,
+                        winit::event::ElementState::Released => PointerEventKind::PointerUp,
+                    },
+                    position: pointer_state.position,
+                    window_position: pointer_state.position,
+                    modifiers: self.inputs.modifiers,
+                    buttons: pointer_state.buttons,
+                    pointer_id: *device_id,
+                    button: Some(button),
+                    repeat_count,
+                }))
+            }
+            winit::event::WindowEvent::TouchpadPressure { .. } => None,
+            winit::event::WindowEvent::AxisMotion { .. } => None,
+            winit::event::WindowEvent::Touch(_) => None,
+            winit::event::WindowEvent::ThemeChanged(_) => None,
+            _ => None,
+        };
+
+        if let Some(event) = event {
+            //------------------------------------------------
+            // force release pointer grab on pointer up
+            match event {
+                Event::Pointer(PointerEvent {
+                    kind: PointerEventKind::PointerUp,
+                    ..
+                }) => {
+                    trace!("forcing release of pointer grab");
+                    self.pointer_grab = None;
+                }
+                _ => {}
+            }
+
+            //------------------------------------------------
+            // Follow-up 1: determine to which nodes the event should be sent
+            match event {
+                Event::Pointer(ref pointer_event) => {
+                    // Pointer events are delivered to the node that is currently grabbing the pointer.
+                    // If nothing is grabbing the pointer, the pointer event is delivered to a widget
+                    // that passes the hit-test
+                    if let Some(id) = self.pointer_grab {
+                        // route event to target
+                        app_ctx.post_event(InternalEvent::RouteEvent {
+                            target: id,
+                            event: Box::new(event.clone()),
+                        });
+                    } else {
+                        // route event by hit-test
+                        app_ctx.post_event(InternalEvent::RouteHitTestEvent {
+                            position: pointer_event.position,
+                            event: Box::new(event.clone()),
+                        });
+                    }
+                }
+                Event::Keyboard(ref k) => {
+                    // keyboard events are delivered to the widget that has the focus.
+                    // if no widget has focus, the event is dropped.
+                    if let Some(focus) = self.focus {
+                        app_ctx.post_event(InternalEvent::RouteEvent {
+                            target: focus,
+                            event: Box::new(event.clone()),
+                        });
+                    }
+                }
+                _ => {
+                    // TODO
+                }
+            };
+
+            /*//------------------------------------------------
+            // Follow-up 2: update 'hot' node (the node that the pointer is hovering above)
+            // Post pointerout/pointerover events
+            match event {
+                Event::Pointer(ref pointer_event) => {
+                    let old_hot = self.hot;
+                    self.hot = target_node_id;
+
+                    // send  (in that order) and update 'hot' node
+                    match pointer_event.kind {
+                        PointerEventKind::PointerUp
+                        | PointerEventKind::PointerDown
+                        | PointerEventKind::PointerMove => {
+                            if old_hot != target_node_id {
+                                if let Some(old_and_busted) = old_hot {
+                                    trace!(node_id = ?old_and_busted, "widget going cold");
+                                    let pointer_out = Event::Pointer(PointerEvent {
+                                        kind: PointerEventKind::PointerOut,
+                                        ..*pointer_event
+                                    });
+                                    app_ctx.post_event(InternalEvent::RouteEvent {
+                                        target: old_and_busted,
+                                        event: Box::new(pointer_out),
+                                    });
+                                }
+                                if let Some(new_hotness) = target_node_id {
+                                    trace!(node_id = ?new_hotness, "widget going hot");
+                                    let pointer_over = Event::Pointer(PointerEvent {
+                                        kind: PointerEventKind::PointerOver,
+                                        ..*pointer_event
+                                    });
+
+                                    app_ctx.post_event(InternalEvent::RouteEvent {
+                                        target: new_hotness,
+                                        event: Box::new(pointer_over),
+                                    });
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            };*/
+        }
+    }
 }
 
-impl Window {
-    #[composable(uncached)]
-    pub fn new(
-        window_builder: WindowBuilder,
-        children: Vec<Widget>,
-    ) -> Widget<Window> {
+/// A window managed by kyute.
+pub struct Window<T> {
+    state: WindowState,
+    contents: WidgetPod<T>,
+}
 
-        // retained widget state: you need one to build a widget;
-        // it's also how you respond to events
-        let mut widget_state = Context::state(move || WidgetState::new());  // StateCell<WindowState>
-
-        // create the window (called only once)
-        /*let mut window_state = Context::state(move || {
-            WindowState {
+impl<T: Model> Window<T> {
+    pub fn new(window_builder: WindowBuilder, contents: impl Widget<T> + 'static) -> Window<T> {
+        Window {
+            state: WindowState {
                 window: None,
                 window_builder: Some(window_builder),
                 inputs: Default::default(),
-                scale_factor: 0.0,
+                last_click: None,
+                scale_factor: 1.0,
                 invalid: Default::default(),
-                needs_layout: false,
-            }
-        }); // StateCell<WindowState>*/
-
-        // full mutable access to widget_state here: handle events, etc.
-        // full mutable access to window_state here: update it or whatever
-
-        /*let widget_state = widget_state.commit(); // convert to State<...>
-        let window_state = window_state.commit();*/
-
-        /*Widget::new(
-            widget_state.into(),        // writes back the
-            Window {
-               // window_state: window_state.into(),
-                children,
+                needs_layout: true,
+                focus: None,
+                pointer_grab: None,
+                hot: None,
             },
-        )*/
-
-        todo!()
+            contents: WidgetPod::new(Box::new(contents)),
+        }
     }
+
+    fn process_window_event(&mut self) {}
 }
 
-impl WidgetDelegate for Window {
-    fn debug_name(&self) -> &str {
-        std::any::type_name::<Self>()
+impl<T: Model> Widget<T> for Window<T> {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut T) -> Option<T::Change> {
+        match event {
+            Event::WindowEvent(window_event) => {
+                self.state.process_window_event(ctx.app_ctx, window_event);
+            }
+            Event::WindowRedrawRequest => {
+                if let Some(window) = self.state.window.as_mut() {
+                    let window_size = window
+                        .window()
+                        .inner_size()
+                        .to_logical(window.window().scale_factor());
+                    let mut wdc = WindowDrawContext::new(window);
+                    let window_bounds = Rect::new(
+                        Point::origin(),
+                        Size::new(window_size.width, window_size.height),
+                    );
+                    let mut paint_ctx = PaintCtx::new(&mut wdc, window_bounds);
+                    // TODO environment
+                    self.contents
+                        .paint(&mut paint_ctx, window_bounds, &Environment::new());
+                } else {
+                    tracing::warn!("WindowRedrawRequest: window has not yet been created");
+                }
+            }
+            _ => {}
+        }
+
+        // TODO
+        None
     }
 
-    /*fn mount(&self, app_ctx: &mut AppCtx) {
+    fn lifecycle(&mut self, ctx: &mut EventCtx, lifecycle_event: &LifecycleEvent, data: &T) {
+        self.contents.lifecycle(ctx, lifecycle_event, data)
+    }
 
-    }*/
 
     fn layout(
-        &self,
+        &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
+        data: &T,
         env: &Environment,
-    ) -> LayoutItem {
-        /*let (width, height): (f64, f64) = self.window_state.window.window().inner_size().into();
+    ) -> Measurements {
+        let window = if let Some(ref window) = self.state.window {
+            window
+        } else {
+            tracing::warn!("window not created");
+            return Measurements::default();
+        };
 
-        let layouts: Vec<_> = self
-            .children
-            .iter()
-            .map(|child| {
-                (
-                    Offset::zero(),
-                    child.layout(ctx, BoxConstraints::loose(Size::new(width, height)), env),
-                )
-            })
-            .collect();
-
-        LayoutItem::with_children(Measurements::new(Size::new(width, height)), layouts)*/
-        todo!()
+        let m_contents = self.contents.layout(ctx, constraints, data, env);
+        let window_size = window
+            .window()
+            .inner_size()
+            .to_logical::<f64>(window.window().scale_factor());
+        let mut m_window = Measurements::new(Size::new(window_size.width, window_size.height));
+        let offset = align_boxes(Alignment::CENTER, &mut m_window, m_contents);
+        self.contents.set_child_offset(offset);
+        Default::default()
     }
 
     fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
-        for c in self.children.iter() {
-            c.paint(ctx, bounds, env);
-        }
+        // nothing to do
     }
 }
-
-/*
-pub struct Window<'a> {
-    builder: WindowBuilder,
-    contents: BoxedWidget<'a>,
-    callbacks: Callbacks,
-    parent_window: Option<&'a PlatformWindow>,
-}
-
-impl<'a> Window<'a> {
-    pub fn new(builder: WindowBuilder) -> Window<'a> {
-        Window {
-            builder,
-            contents: DummyWidget.boxed(),
-            callbacks: Callbacks::default(),
-            parent_window: None,
-        }
-    }
-}*/

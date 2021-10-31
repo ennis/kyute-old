@@ -1,25 +1,51 @@
 use crate::{
-    cache_cell::CacheCell,
-    event::{InputState, PointerEvent},
-    layout::LayoutItem,
+    application::AppCtx,
+    bloom::Bloom,
+    event::{InputState, LifecycleEvent, PointerEvent},
     region::Region,
-    BoxConstraints, Context, Data, Environment, Event, Measurements, Offset, Point, Rect, Size,
+    util::Counter,
+    BoxConstraints, Data, Environment, Event, InternalEvent, Measurements, Model, Offset, Point,
+    Rect, Size,
 };
-use kyute_macros::composable;
-use kyute_shell::{drawing::DrawContext, winit::window::WindowId};
+use kyute_shell::{
+    drawing::DrawContext,
+    winit::{event::WindowEvent, window::WindowId},
+};
 use std::{
-    cell::{Cell, RefCell},
     fmt,
     fmt::Formatter,
     hash::{Hash, Hasher},
+    marker::PhantomData,
+    num::NonZeroU64,
     ops::{Deref, DerefMut},
-    sync::{Arc, Mutex, Weak},
 };
+
+/// ID of a node in the tree.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct WidgetId(NonZeroU64);
+
+impl fmt::Debug for WidgetId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:04X}", self.0.get())
+    }
+}
+
+static WIDGET_ID_COUNTER: Counter = Counter::new();
+
+impl WidgetId {
+    /// Generates a new node ID unique for this execution of the program.
+    pub fn next() -> WidgetId {
+        let val = WIDGET_ID_COUNTER.next_nonzero();
+        WidgetId(val)
+    }
+}
 
 /// Context passed to widgets during the layout pass.
 ///
 /// See [`Widget::layout`].
-pub struct LayoutCtx {}
+pub struct LayoutCtx<'ctx> {
+    app_ctx: &'ctx mut AppCtx,
+}
 
 pub struct PaintCtx<'a> {
     draw_ctx: &'a mut DrawContext,
@@ -27,6 +53,12 @@ pub struct PaintCtx<'a> {
 }
 
 impl<'a> PaintCtx<'a> {
+    pub fn new(draw_ctx: &'a mut DrawContext, window_bounds: Rect) -> PaintCtx<'a> {
+        PaintCtx {
+            draw_ctx,
+            window_bounds,
+        }
+    }
     /*/// Returns the window bounds of the node
     pub fn window_bounds(&self) -> Rect {
         self.window_bounds
@@ -76,13 +108,12 @@ impl<'a> DerefMut for PaintCtx<'a> {
     }
 }
 
-pub struct EventCtx {
-    //pub(crate) focus_request: WeakWidgetRef,
+pub struct EventCtx<'a, 'ctx> {
+    pub(crate) app_ctx: &'ctx mut AppCtx,
+    pub(crate) state: Option<&'a mut WidgetState>,
 }
 
-impl EventCtx {
-    pub fn enqueue_action(&mut self) {}
-
+impl<'a, 'ctx> EventCtx<'a, 'ctx> {
     /// Returns the bounds of the current widget.
     // TODO in what space?
     pub fn bounds(&self) -> Rect {
@@ -139,82 +170,272 @@ impl EventCtx {
     }
 }
 
-pub struct WindowPaintCtx {}
+pub struct UpdateCtx<'a, 'ctx> {
+    app_ctx: &'ctx mut AppCtx,
+    state: Option<&'a mut WidgetState>,
+    children_changed: bool,
+}
 
-/// Internal widget state.
-#[derive(Clone)]
-pub struct WidgetState {}
-
-impl WidgetState {
-    pub fn new() -> WidgetState {
-        WidgetState {}
+impl<'a, 'ctx> UpdateCtx<'a, 'ctx> {
+    pub fn children_changed(&mut self) {
+        self.children_changed = true;
     }
 }
 
-pub struct WidgetInner<T: ?Sized> {
-    // Widget retained state.
-    //state: State<WidgetState>,
-    /// Widget delegate
-    delegate: T,
-}
-
-/// Represents a widget.
-pub struct Widget<T: ?Sized = dyn WidgetDelegate>(Arc<WidgetInner<T>>);
-
-impl<T: ?Sized> Clone for Widget<T> {
-    fn clone(&self) -> Self {
-        Widget(self.0.clone())
-    }
-}
-
-impl<T: WidgetDelegate + 'static> From<Widget<T>> for Widget {
-    fn from(widget: Widget<T>) -> Self {
-        Widget(widget.0)
-    }
-}
-
-impl<T: ?Sized + WidgetDelegate> Widget<T> {
-    /// Called to measure this widget and layout the children of this widget.
-    pub fn layout(
-        &self,
-        ctx: &mut LayoutCtx,
-        constraints: BoxConstraints,
-        env: &Environment,
-    ) -> LayoutItem {
-        // TODO cache the layout result
-        self.0.delegate.layout(ctx, constraints, env)
-    }
-
-    pub fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
-        self.0.delegate.paint(ctx, bounds, env)
-    }
-}
-
-/// Trait that defines the behavior of a widget.
-pub trait WidgetDelegate {
+/// Trait implemented by widgets.
+pub trait Widget<T: Model> {
     /// Implement to give a debug name to your widget. Used only for debugging.
     fn debug_name(&self) -> &str {
-        "WidgetDelegate"
+        "Widget"
     }
+
+    /// Propagates an event to the widget hierarchy.
+    // FIXME: right now it can only return one change
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut T) -> Option<T::Change> {
+        None
+    }
+
+    fn lifecycle(&mut self, ctx: &mut EventCtx, event: &LifecycleEvent, data: &mut T);
+
+    /// Propagates a data update.
+    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {}
 
     /// Called to measure this widget and layout the children of this widget.
     fn layout(
-        &self,
+        &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
+        data: &mut T,
         env: &Environment,
-    ) -> LayoutItem;
+    ) -> Measurements;
 
     /// Called to paint the widget
     fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment);
+}
 
-    /// Called only for native window widgets.
-    fn window_paint(&self, _ctx: &mut WindowPaintCtx) {}
+/// Boxed widget impls.
+impl<T, W> Widget<T> for Box<W>
+where
+    T: Model,
+    W: Widget<T> + ?Sized,
+{
+    fn debug_name(&self) -> &str {
+        Widget::debug_name(&**self)
+    }
 
-    /// Returns `true` if the widget is fully opaque when drawn, `false` if it is semitransparent.
-    /// This is mostly used as an optimization: if a semitransparent widget needs to be redrawn,
-    /// its background (and thus the parent
-    fn is_opaque(&self) -> bool {
-        false
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut T) -> Option<T::Change> {
+        Widget::event(&mut **self, ctx, event, data)
+    }
+
+    fn lifecycle(&mut self, ctx: &mut EventCtx, event: &LifecycleEvent, data: &mut T) {
+        Widget::lifecycle(&mut **self, ctx, event, data)
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {
+        Widget::update(&mut **self, ctx, data, change)
+    }
+
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        constraints: BoxConstraints,
+        data: &mut T,
+        env: &Environment,
+    ) -> Measurements {
+        Widget::layout(&mut **self, ctx, constraints, data, env)
+    }
+
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+        Widget::paint(&**self, ctx, bounds, env)
+    }
+}
+
+/// Common internal state of widgets.
+pub(crate) struct WidgetState {
+    /// Whether this widget received the `Initialize` event.
+    initialized: bool,
+
+    /// Unique widget ID, assigned on creation.
+    id: WidgetId,
+
+    /// Visual position within the parent.
+    offset: Offset,
+
+    /// Measurements returned by the last call to `Widget::layout`
+    measurements: Measurements,
+
+    /// A bloom filter used to filter out children that don't belong to this widget.
+    ///
+    /// It should be updated whenever a child is added to or removed from this widget.
+    child_filter: Bloom<WidgetId>,
+}
+
+/// A container for a widget in the hierarchy.
+pub struct WidgetPod<T, W = Box<dyn Widget<T>>> {
+    /// Internal widget state.
+    ///
+    /// Split into a separate struct for easier split borrowing.
+    pub(crate) state: WidgetState,
+
+    /// The widget itself.
+    pub(crate) inner: W,
+
+    _phantom: PhantomData<*const T>,
+}
+
+impl<T: Model, W: Widget<T>> WidgetPod<T, W> {
+    /// Creates a new `WidgetPod` wrapping the given widget.
+    pub fn new(inner: W) -> WidgetPod<T, W> {
+        WidgetPod {
+            state: WidgetState {
+                initialized: false,
+                id: WidgetId::next(),
+                offset: Default::default(),
+                measurements: Default::default(),
+                child_filter: Default::default(),
+            },
+            inner,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Sets the layout position of this widget within its parent.
+    /// Should be called by widgets in `Widget::layout`.
+    pub fn set_child_offset(&mut self, offset: Offset) {
+        self.state.offset = offset;
+    }
+
+    /// Propagates an event to the wrapped widget.
+    pub fn event(
+        &mut self,
+        parent_ctx: &mut EventCtx,
+        event: &Event,
+        data: &mut T,
+    ) -> Option<T::Change> {
+        // Handle internal events (routing mostly)
+        match event {
+            Event::Internal(InternalEvent::RouteWindowEvent { target, event }) => {
+                if *target == self.state.id {
+                    return self.event(parent_ctx, &Event::WindowEvent(event.clone()), data);
+                }
+                if !self.state.child_filter.may_contain(target) {
+                    return None;
+                }
+            }
+            Event::Internal(InternalEvent::RouteRedrawRequest(target)) => {
+                if *target == self.state.id {
+                    return self.event(parent_ctx, &Event::WindowRedrawRequest, data);
+                }
+                if !self.state.child_filter.may_contain(target) {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+
+        // Propagate
+        let mut ctx = EventCtx {
+            app_ctx: parent_ctx.app_ctx,
+            state: Some(&mut self.state),
+        };
+        self.inner.event(&mut ctx, event, data)
+    }
+
+    /// Propagates a lifecycle event to the wrapped widget.
+    pub fn lifecycle(&mut self, parent_ctx: &mut EventCtx, event: &LifecycleEvent, data: &T) {
+        match event {
+            LifecycleEvent::UpdateChildFilter => {
+                if let Some(state) = parent_ctx.state.as_deref_mut() {
+                    state.child_filter.add(&self.state.id);
+                    state.child_filter.extend(&self.state.child_filter);
+                } else {
+                    tracing::warn!("UpdateChildFilter sent to root widget");
+                }
+                // No need to propagate
+                return;
+            }
+            LifecycleEvent::RouteInitialize => {
+                if !self.state.initialized {
+                    // send initialize event
+                    // FIXME: with this API, an `Initialize` event can modify data, but the potential resulting change is ignored.
+                    // Replace this by a specialized method (e.g. `lifecycle` from druid)
+                    self.lifecycle(parent_ctx, &LifecycleEvent::Initialize, data);
+                    self.state.initialized = true;
+                } else {
+                    // assume all children initialized as well, so don't propagate
+                    return;
+                }
+            }
+            _ => {}
+        }
+
+        // Propagate
+        let mut ctx = EventCtx {
+            app_ctx: parent_ctx.app_ctx,
+            state: Some(&mut self.state),
+        };
+        self.inner.lifecycle(&mut ctx, event, data);
+    }
+
+    /// Propagates a data change to the wrapped widget.
+    pub fn update(&mut self, parent_ctx: &mut UpdateCtx, data: &T, change: &T::Change) {
+        // parent_ctx: ctx of the parent widget
+        // ctx: ctx of this widget
+
+        // propagate
+        let mut ctx = UpdateCtx {
+            app_ctx: parent_ctx.app_ctx,
+            state: Some(&mut self.state),
+            children_changed: false,
+        };
+        self.inner.update(&mut ctx, data, change);
+
+        if ctx.children_changed {
+            // children changed: filter is invalid, rebuild it
+            ctx.state.as_mut().unwrap().child_filter.clear();
+            let mut event_ctx = EventCtx {
+                app_ctx: ctx.app_ctx,
+                state: ctx.state,
+            };
+            self.inner.lifecycle(
+                &mut event_ctx,
+                &LifecycleEvent::UpdateChildFilter,
+                data,
+            );
+            parent_ctx.children_changed = true;
+
+            // initialize new children
+            self.inner.lifecycle(
+                &mut event_ctx,
+                &LifecycleEvent::RouteInitialize,
+                data,
+            );
+        }
+    }
+
+    /// Called to measure this widget and layout the children of this widget.
+    pub fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        constraints: BoxConstraints,
+        data: &T,
+        env: &Environment,
+    ) -> Measurements {
+        self.state.measurements = self.inner.layout(ctx, constraints, data, env);
+        self.state.measurements
+    }
+
+    /// Draws the widget using the given `PaintCtx`.
+    pub fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+        self.inner.paint(ctx, bounds, env)
+    }
+
+    pub(crate) fn send_root_event(&mut self, app_ctx: &mut AppCtx, event: &Event, data: &mut T) {
+        let mut event_ctx = EventCtx {
+            app_ctx,
+            state: None,
+        };
+
+        self.event(&mut event_ctx, event, data);
     }
 }

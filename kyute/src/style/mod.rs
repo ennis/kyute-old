@@ -3,7 +3,6 @@
 use kyute_shell::drawing::{DrawContext, Color, GradientStopCollection, ColorInterpolationMode, ExtendMode};
 use kyute_shell::drawing;
 use crate::{EnvKey, Rect, Offset, SideOffsets};
-use std::collections::HashMap;
 use crate::env::Environment;
 use std::sync::Arc;
 use crate::data::Data;

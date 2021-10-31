@@ -767,9 +767,104 @@ Strategy 1 is closer to building an incremental function; but like automatic dif
 - list-to-list mapping with conditionals: OK
 
 ## Decision: continue with strategy 2.2 (Caching) or try strategy 1 (Reactive)?
+
+Caching: moxie-like with cloneable+comparable data models
+Reactive: druid-like with explicit diffs
+
 The main difference is that caching needs comparable data models to be effective, while reactive can work with any data model.
 However, caching may be able to represent more complex datamodel->view transformations, and is less restrictive on 
 how the data model can be updated.
 Reactive needs compiler support (through a macroDSL which will most likely prevent all IDE autocompletion), while caching can work with minimal macros.
 (Quoting Raph Levien on zulip: "how can you express UI using fairly vanilla language constructs?")
 
+## Reactivity
+Two things:
+- First, the Widget trait must have a generic API to pass down data updates (needed for type-erased widgets). 
+  - Hence the `update` function taking a `&T`
+  - We would like one function for each property
+  - Could imagine a less type-safe, stringly-typed API: `fn update(&mut self, property_name: &str, value: &dyn Any)`
+
+
+Each widget has a associated data type that it is supposed to manipulate or pass around, like druid.
+However, they can also have "properties", which are simply setters/getters for widget properties that can change
+(e.g. for a label widget, change the font size, etc.). They are not defined in any particular trait (it's just `set_xxx` and `get_xxx` functions on the inherent impl).
+Those can be updated given mutable access to the widget.
+Special wrapper widgets are instantiated that turn changes in the associated data (`T`) to property updates.
+
+### View props: values that come from above
+Two approaches:
+1. We require the user to transform the data fed to the view into a well-known shape:
+```rust
+struct Props<'a> {
+    i: &'a mut i32,
+    text: &'a mut String,
+}
+
+struct View {}
+
+impl<'a> Widget<Props<'a>> for View {
+    // ...
+}
+```
+This introduces a lifetime in the ambient data type => cannot type-erase anymore.
+
+2. We let the user specify the ambient type, but build the view with "lenses" for each property to access (or synthesize!) the value of the prop from the ambient data.
+```rust
+struct View<T> {
+    counter: Binding<T, i32>,
+    text: Binding<T, String>,
+}
+
+impl<T> Widget<T> for View<T> {
+    // ...
+}
+```
+Given a `T::Change` and a `Binding<T,...>`, it's possible to query whether the change affects the value of a binding: `binding.changed(T::Change)`.
+This pushes the responsibility of responding to changes to the widget, but at the same time it reduces the amount of code
+that needs to be generated for "binders" (wrapper widgets that manually update the widget's properties by calling setters).
+`T` could potentially be the whole appstate.
+However, this makes the implementation of most widgets generic on the data type.
+
+Issue: introducing local state will still look like this:
+```rust
+struct Data<'a,T> {
+    parent_data: &'a mut T,
+    local_state: &'a mut State,
+}
+```
+Or it could look like this (pass bindings):
+```rust
+struct LocalState<T,U> {
+    parent_data: Binding<T,U>,
+    local_state: ???,
+}
+```
+
+### What if there was no ambient state type?
+Only properties (writable or read-only).
+For leaf widgets (e.g. sliders, buttons, etc.) it's possible, but what about containers?
+There must be a way to propagate data & data changes through containers, which erase the precise type of their widgets.
+
+When to use ambient data, and when to use properties?
+-> if the value is immmutable: named property
+-> if the value can be changed by the widget: ambient data
+
+Note that a `set_xxx` property means that a copy of the provided value must be made. With property values passed in the
+ambient data type, there's no need to copy (the value is accessible during events, layout, and paint).
+
+Passing property values:
+1. with explicit setters
+   - one-way binding only
+2. using `Binding<AmbientData,T>` objects 
+   - two-way binding
+3. with bespoke data types for each widget
+   - e.g. `ListData<T> { selected_index: usize, list: Vec<T> }`
+   - two-way binding
+4. *** with traits implemented on the data type
+
+
+
+Three things:
+- ambient data
+- properties (setters)
+- internal state

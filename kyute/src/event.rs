@@ -5,6 +5,7 @@ use winit::event::DeviceId;
 
 pub use keyboard_types::{CompositionEvent, KeyboardEvent, Modifiers};
 use kyute_shell::winit;
+use crate::core2::WidgetId;
 
 /// Represents the type of pointer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -120,8 +121,25 @@ pub enum MoveFocusDirection {
     After,
 }
 
+#[derive(Clone, Debug)]
+pub enum InternalEvent {
+    RouteEvent {
+        target: WidgetId,
+        event: Box<Event>
+    },
+    RouteHitTestEvent {
+        position: Point,
+        event: Box<Event>,
+    },
+    RouteWindowEvent {
+        target: WidgetId,
+        event: winit::event::WindowEvent<'static>
+    },
+    RouteRedrawRequest(WidgetId),
+}
+
 /// Events.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Event {
     FocusGained,
     FocusLost,
@@ -131,6 +149,18 @@ pub enum Event {
     Keyboard(KeyboardEvent),
     /// A composition event.
     Composition(CompositionEvent),
+    WindowEvent(winit::event::WindowEvent<'static>),
+    WindowRedrawRequest,
+    Internal(InternalEvent)
+}
+
+#[derive(Clone, Debug)]
+pub enum LifecycleEvent {
+    Initialize,
+    /// Kyute internal.
+    UpdateChildFilter,
+    /// Kyute internal.
+    RouteInitialize,
 }
 
 impl Event {
@@ -153,6 +183,12 @@ impl Event {
             Event::Composition(p) => Some(p),
             _ => None,
         }
+    }
+}
+
+impl From<InternalEvent> for Event {
+    fn from(v: InternalEvent) -> Self {
+        Event::Internal(v)
     }
 }
 
