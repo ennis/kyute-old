@@ -1,5 +1,9 @@
-use kyute::{view, widget::Slider, BoxConstraints, Environment, Event, EventCtx, LayoutCtx, Measurements, Model, PaintCtx, Rect, UpdateCtx, Widget, LifecycleEvent};
-use kyute::widget::{Axis, Flex};
+use kyute::{
+    view,
+    widget::{Axis, Flex, Slider},
+    BoxConstraints, DynLens, Environment, Event, EventCtx, LayoutCtx, LifecycleEvent, Measurements,
+    Model, PaintCtx, Rect, UpdateCtx, Widget,
+};
 
 #[derive(Model)]
 struct Item {
@@ -22,55 +26,63 @@ fn derive_in_function() {
     }
 }
 
-trait CounterLabel_Properties: Model {
-    fn get_current_value(&self) -> f64;
-    fn set_current_value(&mut self, value: f64);
-    fn get_max_value(&self) -> f64;
-    fn get_label(&self) -> String;
+struct CounterLabel_Properties<T> {
+    current_value: DynLens<T, f64>,
+    label: DynLens<T, String>,
 }
 
 struct CounterLabel_State {
     max_value: f64,
 }
 
-struct CounterLabel_Data<T: CounterLabel_Properties> {
+#[derive(Model)]
+struct CounterLabel_Data<T> {
     outer_data: T,
     state: CounterLabel_State,
 }
 
-struct CounterLabel<T: CounterLabel_Properties> {
+struct CounterLabel<T> {
+    props: CounterLabel_Properties<T>,
     state: Option<CounterLabel_State>,
-    inner: Flex<CounterLabel_Data<T>>
+    root: Flex<CounterLabel_Data<T>>,
 }
 
-impl<T: CounterLabel_Properties> Flex_Properties for CounterLabel_Data<T> {
-    // issue: cannot autogen return type!
-    fn get_orientation(&self) -> Axis {
-
-    }
-}
-
-impl<T: CounterLabel_Properties> CounterLabel<T> {
+impl<T> CounterLabel<T> {
     pub fn new() -> CounterLabel<T> {
         CounterLabel {
             state: Some(CounterLabel_State::new()),
-            inner: Flex::new()
+            root: Flex::new()
                 .bind_axis(|_| Axis::Vertical)
                 .bind_items(|data, change, items| {
-                    items.push(Slider::new()
-                        .bind_min(|_| 0.0)
-                        .bind_value(|_| data.state.max_value))
-                })
+                    if !items.is_empty() {
+                        return None;
+                    }
+                    *items = vec![WidgetPod::new(
+                        Slider::new()
+                            .bind_min(|_| 0.0)
+                            .bind_value(|_| data.state.max_value),
+                    )];
+                    None
+                }),
         }
+    }
+
+    pub fn bind_current_value(mut self) -> Self {
+        self
     }
 }
 
-impl<T: CounterLabel_Properties> Widget<T> for CounterLabel<T> {
+impl<T> Widget<T> for CounterLabel<T> {
     fn debug_name(&self) -> &str {
         "CounterLabel"
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut T) -> Option<<T as Model>::Change> {
+    fn event(
+        &mut self,
+        ctx: &mut EventCtx,
+        event: &Event,
+        data: &mut T,
+    ) -> Option<<T as Model>::Change> {
         todo!()
     }
 
@@ -78,7 +90,7 @@ impl<T: CounterLabel_Properties> Widget<T> for CounterLabel<T> {
         take_mut::take(data, |outer_data| {
             let mut inner_data = CounterLabel_Data {
                 outer_data,
-                state: self.state.take().unwrap()
+                state: self.state.take().unwrap(),
             };
             self.inner.lifecycle(ctx, lifecycle_event, &mut inner_data);
             self.state.replace(inner_data.state);
@@ -90,7 +102,13 @@ impl<T: CounterLabel_Properties> Widget<T> for CounterLabel<T> {
         todo!()
     }
 
-    fn layout(&mut self, ctx: &mut LayoutCtx, constraints: BoxConstraints, data: &T, env: &Environment) -> Measurements {
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        constraints: BoxConstraints,
+        data: &T,
+        env: &Environment,
+    ) -> Measurements {
         self.contents.layout(ctx, constraints, data, env)
     }
 
@@ -99,15 +117,7 @@ impl<T: CounterLabel_Properties> Widget<T> for CounterLabel<T> {
     }
 }
 
-trait Slider_Properties {
-    fn get_min(&self) -> f64;
-    fn get_max(&self) -> f64;
-    fn get_value(&self) -> f64;
-    fn set_value(&mut self, v: f64) -> f64;
-}
-
 fn main() {
-
     view! {
         view CounterLabel(
             mut current_value: f64,
@@ -123,7 +133,8 @@ fn main() {
                 // Slider<T>? even if all that slider needs is Slider<f64>
                 Slider {
                     min: 0.0;
-                    max: max_value;
+                    max: max_value;          // issue: how to find max_value here? (it's data.state.max_value)
+                    value: current_value;    // same (it's `self.props.current_value.get(&data.outer_data)`), but can't borrow props!
                 }
             }
         }

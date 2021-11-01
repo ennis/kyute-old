@@ -21,28 +21,25 @@ pub mod theme;
 //mod default_style;
 //mod cache;
 pub mod application;
+mod binding;
 mod call_key;
 mod core2;
 mod model;
 mod style;
 pub mod widget;
 mod window;
-mod binding;
 
-pub use kyute_macros::Model;
-pub use kyute_macros::view;
+pub use kyute_macros::{view, Model};
 
-pub use core2::{EventCtx, LayoutCtx, UpdateCtx, PaintCtx, Widget};
+pub use binding::{DynLens, Lens, LensExt};
+pub use core2::{EventCtx, LayoutCtx, PaintCtx, UpdateCtx, Widget};
 pub use data::Data;
 pub use env::{EnvKey, EnvValue, Environment};
-pub use event::{Event, LifecycleEvent, InternalEvent};
+pub use event::{Event, InternalEvent, LifecycleEvent};
 pub use layout::{align_boxes, Alignment, BoxConstraints, Measurements};
-pub use model::Model;
-pub use window::Window;
+pub use model::{CollectionChange, Model};
 pub use take_mut;
-pub use binding::Lens;
-pub use binding::DynLens;
-pub use binding::LensExt;
+pub use window::Window;
 
 pub type Dip = kyute_shell::drawing::Dip;
 pub type Px = kyute_shell::drawing::Px;

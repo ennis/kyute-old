@@ -1,21 +1,22 @@
 use crate::CRATE;
 use proc_macro2::{Span, TokenStream, TokenTree};
-use quote::{quote, TokenStreamExt};
+use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
     braced, bracketed, parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
+    spanned::Spanned,
     token::Token,
-    Token,
+    Expr, Token,
 };
 
-struct ViewKeyword;
+struct WidgetKeyword;
 
-impl Parse for ViewKeyword {
+impl Parse for WidgetKeyword {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let ident: syn::Ident = input.parse()?;
         if ident == "view" {
-            Ok(ViewKeyword)
+            Ok(WidgetKeyword)
         } else {
             Err(syn::Error::new(Span::call_site(), "expected `view`"))
         }
@@ -23,13 +24,13 @@ impl Parse for ViewKeyword {
 }
 
 #[derive(Debug)]
-struct StateField {
+struct StateDecl {
     name: syn::Ident,
     ty: syn::Type,
     init: syn::Expr,
 }
 
-impl StateField {
+impl StateDecl {
     fn gen_field(&self) -> TokenStream {
         let name = &self.name;
         let ty = &self.ty;
@@ -37,7 +38,7 @@ impl StateField {
     }
 }
 
-impl Parse for StateField {
+impl Parse for StateDecl {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let _let: Token![let] = input.parse()?;
         let _mut: Token![mut] = input.parse()?;
@@ -47,16 +48,16 @@ impl Parse for StateField {
         let _eq: Token![=] = input.parse()?;
         let init: syn::Expr = input.parse()?;
         let _semi: Token![;] = input.parse()?;
-        let state_field = StateField { name, ty, init };
-        eprintln!("StateField {:?}", state_field);
-        Ok(state_field)
+        let statevar = StateDecl { name, ty, init };
+        eprintln!("StateVariable {:?}", statevar);
+        Ok(statevar)
     }
 }
 
 #[derive(Debug)]
 struct PropertyBinding {
     name: syn::Ident,
-    init: syn::Expr,
+    expr: syn::Expr,
 }
 
 impl Parse for PropertyBinding {
@@ -64,9 +65,9 @@ impl Parse for PropertyBinding {
         eprintln!("PropertyBinding");
         let name: syn::Ident = input.parse()?;
         let _colon: Token![:] = input.parse()?;
-        let init: syn::Expr = input.parse()?;
+        let expr: syn::Expr = input.parse()?;
         let _semi: Token![;] = input.parse()?;
-        Ok(PropertyBinding { name, init })
+        Ok(PropertyBinding { name, expr })
     }
 }
 
@@ -180,20 +181,20 @@ impl Parse for PropertyDecl {
 }
 
 #[derive(Debug)]
-struct ViewDecl {
+struct WidgetDecl {
     name: syn::Ident,
     props: Punctuated<PropertyDecl, Token![,]>,
     span: Span,
-    state_fields: Vec<StateField>,
-    root_widget: WidgetExpr,
+    states: Vec<StateDecl>,
+    root: WidgetExpr,
 }
 
-impl Parse for ViewDecl {
+impl Parse for WidgetDecl {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        eprintln!("ViewDecl");
+        eprintln!("WidgetDecl");
 
         // `view`
-        let view_kw: ViewKeyword = input.parse()?;
+        let _view_kw: WidgetKeyword = input.parse()?;
 
         // name
         let name: syn::Ident = input.parse()?;
@@ -211,27 +212,167 @@ impl Parse for ViewDecl {
         let body;
         let _braces = braced!(body in input);
 
-        // state fields (let mut xxx = ...);
-        let mut state_fields = vec![];
+        // state decls (let mut xxx = ...);
+        let mut states = vec![];
         while body.peek(Token![let]) {
-            state_fields.push(body.parse()?);
+            states.push(body.parse()?);
         }
 
         eprintln!("past state_fields");
 
         let root_widget = body.parse()?;
 
-        Ok(ViewDecl {
+        Ok(WidgetDecl {
             name,
             span: input.span(),
             props,
-            state_fields,
-            root_widget,
+            states,
+            root: root_widget,
         })
     }
 }
 
-impl ViewDecl {
+fn resolve_binding_ident(view: &WidgetDecl, ident: &syn::Ident) -> Option<TokenStream> {
+    // find in local state
+    if let Some(_) = view.state_fields.iter().find(|state| &state.name == ident) {
+        return Some(quote! { data.state.#ident });
+    }
+    // find in props
+    if let Some(_) = view.props.iter().find(|prop| &prop.name == ident) {
+        return Some(quote! { data.props.#ident });
+    }
+    // not found
+    None
+}
+
+fn rewrite_property_binding_path(
+    view: &WidgetDecl,
+    prop: &PropertyBinding,
+    path: &syn::ExprPath,
+) -> syn::Result<TokenStream> {
+    if path.path.segments.len() == 1 {
+        if let Some(first) = path.path.segments.first() {
+            if first.arguments.is_empty() {
+                if let Some(tokens) = resolve_binding_ident(view, &first.ident) {
+                    return Ok(tokens);
+                }
+            }
+        }
+    }
+
+    Ok(prop.expr.to_token_stream())
+}
+
+// replace property or state idents with the full path in (simple) property binding expressions
+fn rewrite_property_binding_expr(
+    view: &WidgetDecl,
+    prop: &PropertyBinding,
+) -> syn::Result<TokenStream> {
+    match prop.expr {
+        Expr::Field(_) => {
+            todo!()
+        }
+        Expr::If(_) => {
+            todo!()
+        }
+        Expr::Lit(ref lit) => Ok(lit.to_token_stream()),
+        Expr::Path(ref path) => rewrite_property_binding_path(view, prop, path),
+        Expr::Array(_)
+        | Expr::Assign(_)
+        | Expr::AssignOp(_)
+        | Expr::Async(_)
+        | Expr::Await(_)
+        | Expr::Binary(_)
+        | Expr::Block(_)
+        | Expr::Box(_)
+        | Expr::Break(_)
+        | Expr::Call(_)
+        | Expr::Cast(_)
+        | Expr::Closure(_)
+        | Expr::Continue(_)
+        | Expr::ForLoop(_)
+        | Expr::Group(_)
+        | Expr::Index(_)
+        | Expr::Let(_)
+        | Expr::Loop(_)
+        | Expr::Macro(_)
+        | Expr::Match(_)
+        | Expr::MethodCall(_)
+        | Expr::Paren(_)
+        | Expr::Range(_)
+        | Expr::Reference(_)
+        | Expr::Repeat(_)
+        | Expr::Return(_)
+        | Expr::Struct(_)
+        | Expr::Try(_)
+        | Expr::TryBlock(_)
+        | Expr::Tuple(_)
+        | Expr::Type(_)
+        | Expr::Unary(_)
+        | Expr::Unsafe(_)
+        | Expr::Verbatim(_)
+        | Expr::While(_)
+        | Expr::Yield(_) => Err(syn::Error::new(
+            prop.expr.span(),
+            "unsupported expression in property binding",
+        )),
+        _ => Err(syn::Error::new(
+            prop.expr.span(),
+            "unsupported expression in property binding",
+        )),
+    }
+}
+
+// .bind_<property_name>(|data| <property_init>)
+fn gen_property_binding_call(view: &WidgetDecl, prop: &PropertyBinding) -> TokenStream {
+    let bind_method = syn::Ident::new(&format!("bind_{}", prop.name), Span::call_site());
+    let expr = rewrite_property_binding_expr(view, &prop).unwrap_or_else(|e| e.to_compile_error());
+    quote! {
+        .#bind_method (|data| #expr)
+    }
+}
+
+fn gen_child_item_binding(view: &WidgetDecl, widget: &WidgetExpr) -> TokenStream {
+    let child_items: Vec<_> = widget
+        .child_widgets
+        .iter()
+        .map(|w| gen_item_ctor(view, w))
+        .collect();
+
+    quote! {
+        .bind_items(|_data, _change, items| {
+                        if !items.is_empty() { return None }
+                        *items = vec![
+                            #(#child_items,)*
+                        ];
+                        // todo
+                        None
+                })
+    }
+}
+
+fn gen_item_ctor(view: &WidgetDecl, widget: &WidgetExpr) -> TokenStream {
+    let prop_bindings: Vec<_> = widget
+        .properties
+        .iter()
+        .map(|p| gen_property_binding_call(view, p))
+        .collect();
+    let child_binding = if widget.child_widgets.is_empty() {
+        quote! {}
+    } else {
+        gen_child_item_binding(view, widget)
+    };
+
+    let ty = &widget.ty;
+
+    quote! {
+        #ty::new()
+            #(#prop_bindings)*
+            #child_binding
+    }
+}
+
+impl WidgetDecl {
     fn generate(&self) -> TokenStream {
         // generated unique identifier
         let span = self.span;
@@ -267,10 +408,15 @@ impl ViewDecl {
             }
         };
 
-        let event_inner_call = wrap_inner_widget_call(quote!{ self.inner.event(ctx, event, &mut inner_data) });
-        let lifecycle_inner_call = wrap_inner_widget_call(quote!{ self.inner.lifecycle(ctx, event, &mut inner_data) });
-        let layout_inner_call = wrap_inner_widget_call(quote!{ self.inner.layout(ctx, constraints, &mut inner_data, env) });
-        let inner_widget_ty = &self.root_widget.ty;
+        let event_inner_call =
+            wrap_inner_widget_call(quote! { self.root.event(ctx, event, &mut inner_data) });
+        let lifecycle_inner_call =
+            wrap_inner_widget_call(quote! { self.root.lifecycle(ctx, event, &mut inner_data) });
+        let layout_inner_call = wrap_inner_widget_call(
+            quote! { self.root.layout(ctx, constraints, &mut inner_data, env) },
+        );
+        let inner_widget_ty = &self.root.ty;
+        let inner_widget_ctor = gen_item_ctor(self, &self.root);
 
         quote! {
             // props
@@ -288,13 +434,18 @@ impl ViewDecl {
                 #(#state_fields,)*
             }
 
-            struct #view <T: #prop_trait>  {
+            struct #view <T: #prop_trait> {
                 state: Option<#state>,
                 inner: #inner_widget_ty<#data<T>>
             }
 
-            impl #view {
-
+            impl<T: #prop_trait> #view<T> {
+                fn new() -> #view<T> {
+                    #view {
+                        state: Some(#state::new()),
+                        inner: #inner_widget_ctor
+                    }
+                }
             }
 
             impl<T: #prop_trait + #CRATE::Model> #CRATE::Widget<T> for #view<T> {
@@ -328,7 +479,7 @@ impl ViewDecl {
 
 pub(crate) fn generate_view(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     eprintln!("generate_view");
-    let view_decl = syn::parse_macro_input!(input as ViewDecl);
+    let view_decl = syn::parse_macro_input!(input as WidgetDecl);
     eprintln!("{:#?}", view_decl);
     let result = view_decl.generate();
     result.into()

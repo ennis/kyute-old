@@ -1,4 +1,4 @@
-use crate::Model;
+use crate::{model::CollectionChange, Model};
 use std::borrow::Cow;
 
 pub trait Lens<T: Model, U: Clone> {
@@ -122,7 +122,7 @@ impl<T: Model, U: Clone> Lens<T, U> for Box<dyn Lens<T, U>> {
 
 //--------------------------------------------------------------------------------------------------
 
-/// A modification to an indexed collection.
+/*/// A modification to an indexed collection.
 pub enum CollectionUpdate<Item> {
     InsertOne {
         index: usize,
@@ -147,63 +147,40 @@ pub enum CollectionUpdate<Item> {
     ReplaceAll {
         items: Vec<Item>,
     },
-}
+}*/
 
-struct BoundVec<T: Model, Item> {
+/*pub struct BoundVec<T: Model, Item> {
     items: Vec<Item>,
-    f: Box<dyn Fn(&T, &T::Change) -> Option<CollectionUpdate<Item>>>,
+    f: Box<dyn Fn(&T, &T::Change, &mut Vec<Item>) -> Option<CollectionChange>>,
 }
 
 impl<T: Model, Item> BoundVec<T, Item> {
     pub fn new() -> BoundVec<T, Item> {
         BoundVec {
             items: vec![],
-            f: Box::new(|_, _| None),
+            f: Box::new(|_, _, _| None),
         }
     }
 
-    pub fn update(&mut self, data: &T, change: &T::Change) {
-        match (self.f)(data,change) {
-            None => {},
-            Some(update) => {
-                match update {
-                    CollectionUpdate::InsertOne {
-                        index,
-                        item,
-                    } => {
+    pub fn bind(&mut self, f: impl Fn(&T, &T::Change, &mut Vec<Item>) -> Option<CollectionChange>) {
+        self.items.clear();
+        self.f = Box::new(f);
+    }
 
-                    }
-                    CollectionUpdate::InsertSlice {
-                        start,
-                        len,
-                        items,
-                    } => {
+    pub fn update(&mut self, data: &T, change: &T::Change) -> Option<CollectionChange> {
+        (self.f)(data, change, &mut self.items)
+    }
 
-                    }
-                    CollectionUpdate::RemoveOne {
-                        index,
-                    } => {
+    pub fn iter(&self) -> impl Iterator<Item = &Item> {
+        self.items.iter()
+    }
 
-                    }
-                    CollectionUpdate:: RemoveSlice {
-                        start,
-                        len,
-                    } => {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Item> {
+        self.items.iter_mut()
+    }
 
-                    }
-                    CollectionUpdate::Replace {
-                        index,
-                        item,
-                    } => {
-
-                    }
-                    CollectionUpdate::ReplaceAll {
-                        items,
-                    } => {
-
-                    }
-                }
-            }
-        }
+    pub fn len(&self) -> usize {
+        self.items.len()
     }
 }
+*/

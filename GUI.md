@@ -876,4 +876,15 @@ Three things:
    - uses replace_with, which is sketchy (aborts on panic)
    - lots of proc-macro stuff to figure out, lots of unknowns (but seems viable)
    - we may want to use immutable data structures anyway, so explicit changes might not even be useful in the end
-- 
+   - from the user pov:
+      - the view macro expects specific function names and signatures
+      - recently uncovered: will need a specifically-named macro to implement "property" traits 
+      - generally, the proc-macro is somewhat opaque and restrictive
+
+Names:
+- object that transforms an ambient state T to a prop value: Binding
+- view or widget? widget
+- the single child widget of a proc-macro widget declaration: the "root"
+- properties: mutable or read-only
+- local state == state
+- child widgets of a list container: "items"

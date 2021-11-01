@@ -96,13 +96,20 @@ impl<T: Model> Slider<T> {
         }
     }
 
-    /*fn update_value(&mut self, min: f64, max: f64, cursor: Point) {
-        self.value = self.track.value_from_position(cursor, min, max);
-    }*/
+    pub fn bind_min(mut self, min: impl Into<DynLens<T, f64>>) -> Self {
+        self.min = min.into();
+        self
+    }
 
-    /*fn set_value(&mut self, value: f64) {
-        self.value = value;
-    }*/
+    pub fn bind_max(mut self, max: impl Into<DynLens<T, f64>>) -> Self {
+        self.max = max.into();
+        self
+    }
+
+    pub fn bind_value(mut self, value: impl Into<DynLens<T, f64>>) -> Self {
+        self.value = value.into();
+        self
+    }
 }
 
 impl<T: Model> Widget<T> for Slider<T> {

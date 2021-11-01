@@ -1,12 +1,11 @@
 use crate::{
+    binding::{DynLens, LensExt},
     core2::{LayoutCtx, PaintCtx, UpdateCtx, WidgetPod},
+    event::LifecycleEvent,
+    model::CollectionChange,
     BoxConstraints, Environment, Event, EventCtx, Measurements, Model, Offset, Rect, Size, Widget,
 };
-use crate::binding::LensExt;
 use tracing::trace;
-use crate::binding::DynLens;
-use crate::event::LifecycleEvent;
-use crate::model::CollectionChange;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Axis {
@@ -62,18 +61,18 @@ pub enum MainAxisSize {
     Max,
 }
 
-pub struct Flex<T> {
-    axis: DynLens<T,Axis>,
-    items: BoundVec<T, WidgetPod<T>>,
+pub struct Flex<T: Model> {
+    axis: DynLens<T, Axis>,
+    items: Vec<WidgetPod<T>>,
+    update_items: Box<dyn Fn(&T, &T::Change, &mut Vec<WidgetPod<T>>) -> Option<CollectionChange>>,
 }
-
-
 
 impl<T: Model> Flex<T> {
     pub fn new() -> Flex<T> {
         Flex {
             axis: Box::new(|| Axis::Horizontal),
-            items: Box::new(|_,_| )
+            items: vec![],
+            update_items: Box::new(|_, _, _| None),
         }
     }
 
@@ -82,12 +81,11 @@ impl<T: Model> Flex<T> {
         self
     }
 
-    pub fn bind_items(mut self, update_items: impl Fn(&T, &T::Change, &mut Vec<WidgetPod<T>>)) -> Self {
-        self
-    }
-
-    pub fn add_item(mut self, item: impl Widget<T> + 'static) -> Self {
-        self.items.push(WidgetPod::new(Box::new(item)));
+    pub fn bind_items(
+        mut self,
+        update_items: impl Fn(&T, &T::Change, &mut Vec<WidgetPod<T>>) -> Option<CollectionChange> + 'static,
+    ) -> Self {
+        self.update_items = Box::new(update_items);
         self
     }
 }
@@ -100,13 +98,11 @@ impl<T: Model> Widget<T> for Flex<T> {
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {
-        self.items.update(data, change);
-
+        (self.update_items)(data, change, &mut self.items);
         for item in self.items.iter_mut() {
             item.update(ctx, data, change);
         }
     }
-
 
     fn layout(
         &mut self,
@@ -162,23 +158,3 @@ impl<T: Model> Widget<T> for Flex<T> {
         todo!()
     }
 }
-
-/*
-pub fn vbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
-    cx.enter(0);
-    flex(cx, Axis::Vertical, contents);
-    cx.exit();
-}
-
-pub fn hbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
-    cx.enter(0);
-    flex(cx, Axis::Horizontal, contents);
-    cx.exit();
-}
-
-pub fn flex(cx: &mut CompositionCtx, axis: Axis, contents: impl FnMut(&mut CompositionCtx)) {
-    cx.enter(0);
-    cx.emit_node(|cx| Flex::new(axis), |cx, _| {}, contents);
-    cx.exit();
-}
-*/
