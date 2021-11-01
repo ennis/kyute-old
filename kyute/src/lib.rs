@@ -27,6 +27,7 @@ mod model;
 mod style;
 pub mod widget;
 mod window;
+mod binding;
 
 pub use kyute_macros::Model;
 pub use kyute_macros::view;
@@ -39,6 +40,9 @@ pub use layout::{align_boxes, Alignment, BoxConstraints, Measurements};
 pub use model::Model;
 pub use window::Window;
 pub use take_mut;
+pub use binding::Lens;
+pub use binding::DynLens;
+pub use binding::LensExt;
 
 pub type Dip = kyute_shell::drawing::Dip;
 pub type Px = kyute_shell::drawing::Px;

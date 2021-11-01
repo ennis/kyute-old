@@ -198,7 +198,7 @@ pub trait Widget<T: Model> {
     fn lifecycle(&mut self, ctx: &mut EventCtx, event: &LifecycleEvent, data: &mut T);
 
     /// Propagates a data update.
-    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {}
+    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change);
 
     /// Called to measure this widget and layout the children of this widget.
     fn layout(
@@ -210,7 +210,7 @@ pub trait Widget<T: Model> {
     ) -> Measurements;
 
     /// Called to paint the widget
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment);
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, data: &mut T, env: &Environment);
 }
 
 /// Boxed widget impls.
@@ -245,8 +245,8 @@ where
         Widget::layout(&mut **self, ctx, constraints, data, env)
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
-        Widget::paint(&**self, ctx, bounds, env)
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, data: &mut T, env: &Environment) {
+        Widget::paint(&**self, ctx, bounds, data, env)
     }
 }
 
@@ -342,7 +342,7 @@ impl<T: Model, W: Widget<T>> WidgetPod<T, W> {
     }
 
     /// Propagates a lifecycle event to the wrapped widget.
-    pub fn lifecycle(&mut self, parent_ctx: &mut EventCtx, event: &LifecycleEvent, data: &T) {
+    pub fn lifecycle(&mut self, parent_ctx: &mut EventCtx, event: &LifecycleEvent, data: &mut T) {
         match event {
             LifecycleEvent::UpdateChildFilter => {
                 if let Some(state) = parent_ctx.state.as_deref_mut() {
@@ -378,7 +378,7 @@ impl<T: Model, W: Widget<T>> WidgetPod<T, W> {
     }
 
     /// Propagates a data change to the wrapped widget.
-    pub fn update(&mut self, parent_ctx: &mut UpdateCtx, data: &T, change: &T::Change) {
+    pub fn update(&mut self, parent_ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {
         // parent_ctx: ctx of the parent widget
         // ctx: ctx of this widget
 
@@ -418,7 +418,7 @@ impl<T: Model, W: Widget<T>> WidgetPod<T, W> {
         &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
-        data: &T,
+        data: &mut T,
         env: &Environment,
     ) -> Measurements {
         self.state.measurements = self.inner.layout(ctx, constraints, data, env);
@@ -426,8 +426,8 @@ impl<T: Model, W: Widget<T>> WidgetPod<T, W> {
     }
 
     /// Draws the widget using the given `PaintCtx`.
-    pub fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
-        self.inner.paint(ctx, bounds, env)
+    pub fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, data: &mut T, env: &Environment) {
+        self.inner.paint(ctx, bounds, data, env)
     }
 
     pub(crate) fn send_root_event(&mut self, app_ctx: &mut AppCtx, event: &Event, data: &mut T) {

@@ -2,8 +2,11 @@ use crate::{
     core2::{LayoutCtx, PaintCtx, UpdateCtx, WidgetPod},
     BoxConstraints, Environment, Event, EventCtx, Measurements, Model, Offset, Rect, Size, Widget,
 };
+use crate::binding::LensExt;
 use tracing::trace;
+use crate::binding::DynLens;
 use crate::event::LifecycleEvent;
+use crate::model::CollectionChange;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Axis {
@@ -60,16 +63,27 @@ pub enum MainAxisSize {
 }
 
 pub struct Flex<T> {
-    axis: Axis,
-    items: Vec<WidgetPod<T>>,
+    axis: DynLens<T,Axis>,
+    items: BoundVec<T, WidgetPod<T>>,
 }
 
+
+
 impl<T: Model> Flex<T> {
-    pub fn new(axis: Axis) -> Flex<T> {
+    pub fn new() -> Flex<T> {
         Flex {
-            axis,
-            items: vec![],
+            axis: Box::new(|| Axis::Horizontal),
+            items: Box::new(|_,_| )
         }
+    }
+
+    pub fn bind_axis(mut self, axis: impl Into<DynLens<T, Axis>>) -> Self {
+        self.axis = axis.into();
+        self
+    }
+
+    pub fn bind_items(mut self, update_items: impl Fn(&T, &T::Change, &mut Vec<WidgetPod<T>>)) -> Self {
+        self
     }
 
     pub fn add_item(mut self, item: impl Widget<T> + 'static) -> Self {
@@ -79,13 +93,15 @@ impl<T: Model> Flex<T> {
 }
 
 impl<T: Model> Widget<T> for Flex<T> {
-    fn lifecycle(&mut self, ctx: &mut EventCtx, lifecycle_event: &LifecycleEvent, data: &T) {
+    fn lifecycle(&mut self, ctx: &mut EventCtx, event: &LifecycleEvent, data: &mut T) {
         for item in self.items.iter_mut() {
-            item.lifecycle(ctx, lifecycle_event, data);
+            item.lifecycle(ctx, event, data);
         }
     }
 
-    fn update(&mut self, ctx: &mut UpdateCtx, data: &T, change: &T::Change) {
+    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {
+        self.items.update(data, change);
+
         for item in self.items.iter_mut() {
             item.update(ctx, data, change);
         }
@@ -96,9 +112,11 @@ impl<T: Model> Widget<T> for Flex<T> {
         &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
-        data: &T,
+        data: &mut T,
         env: &Environment,
     ) -> Measurements {
+        let axis = self.axis.get_owned(data);
+
         let item_measures: Vec<Measurements> = self
             .items
             .iter_mut()
@@ -107,11 +125,11 @@ impl<T: Model> Widget<T> for Flex<T> {
 
         let max_cross_axis_len = item_measures
             .iter()
-            .map(|l| self.axis.cross_len(l.size()))
+            .map(|l| axis.cross_len(l.size()))
             .fold(0.0, f64::max);
 
         // preferred size of this flex: max size in axis direction, max elem width in cross-axis direction
-        let cross_axis_len = match self.axis {
+        let cross_axis_len = match axis {
             Axis::Vertical => constraints.constrain_width(max_cross_axis_len),
             Axis::Horizontal => constraints.constrain_height(max_cross_axis_len),
         };
@@ -121,14 +139,14 @@ impl<T: Model> Widget<T> for Flex<T> {
         //let spacing = env.get(theme::FlexSpacing);
         let spacing = 1.0;
 
-        let size = match self.axis {
+        let size = match axis {
             Axis::Vertical => Size::new(cross_axis_len, constraints.constrain_height(d)),
             Axis::Horizontal => Size::new(constraints.constrain_width(d), cross_axis_len),
         };
 
         for i in 0..self.items.len() {
-            let len = self.axis.main_len(item_measures[i].size());
-            let offset = match self.axis {
+            let len = axis.main_len(item_measures[i].size());
+            let offset = match axis {
                 Axis::Vertical => Offset::new(0.0, d),
                 Axis::Horizontal => Offset::new(d, 0.0),
             };
@@ -140,7 +158,7 @@ impl<T: Model> Widget<T> for Flex<T> {
         Measurements::new(size)
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, _data: &mut T, env: &Environment) {
         todo!()
     }
 }

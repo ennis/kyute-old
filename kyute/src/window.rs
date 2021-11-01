@@ -1,12 +1,4 @@
-use crate::{
-    align_boxes,
-    application::AppCtx,
-    core2::{WidgetId, WidgetPod},
-    event::{InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind},
-    region::Region,
-    Alignment, BoxConstraints, Environment, Event, EventCtx, InternalEvent, LayoutCtx,
-    Measurements, Model, PaintCtx, PhysicalSize, Point, Rect, Size, Widget,
-};
+use crate::{align_boxes, application::AppCtx, core2::{WidgetId, WidgetPod}, event::{InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind}, region::Region, Alignment, BoxConstraints, Environment, Event, EventCtx, InternalEvent, LayoutCtx, Measurements, Model, PaintCtx, PhysicalSize, Point, Rect, Size, Widget, UpdateCtx};
 use keyboard_types::KeyState;
 use kyute_shell::{
     platform::Platform,
@@ -658,7 +650,7 @@ impl<T: Model> Widget<T> for Window<T> {
                     let mut paint_ctx = PaintCtx::new(&mut wdc, window_bounds);
                     // TODO environment
                     self.contents
-                        .paint(&mut paint_ctx, window_bounds, &Environment::new());
+                        .paint(&mut paint_ctx, window_bounds, data, &Environment::new());
                 } else {
                     tracing::warn!("WindowRedrawRequest: window has not yet been created");
                 }
@@ -670,8 +662,12 @@ impl<T: Model> Widget<T> for Window<T> {
         None
     }
 
-    fn lifecycle(&mut self, ctx: &mut EventCtx, lifecycle_event: &LifecycleEvent, data: &T) {
-        self.contents.lifecycle(ctx, lifecycle_event, data)
+    fn lifecycle(&mut self, ctx: &mut EventCtx, event: &LifecycleEvent, data: &mut T) {
+        self.contents.lifecycle(ctx, event, data)
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {
+        self.contents.update(ctx, data, change)
     }
 
 
@@ -679,7 +675,7 @@ impl<T: Model> Widget<T> for Window<T> {
         &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
-        data: &T,
+        data: &mut T,
         env: &Environment,
     ) -> Measurements {
         let window = if let Some(ref window) = self.state.window {
@@ -700,7 +696,7 @@ impl<T: Model> Widget<T> for Window<T> {
         Default::default()
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+    fn paint(&self, _ctx: &mut PaintCtx, _bounds: Rect, _data: &mut T, _env: &Environment) {
         // nothing to do
     }
 }

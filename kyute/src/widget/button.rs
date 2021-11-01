@@ -1,18 +1,22 @@
-use crate::{align_boxes, core2::{EventCtx, LayoutCtx, PaintCtx, WidgetPod}, event::PointerEventKind, widget::Text, Alignment, BoxConstraints, Environment, Event, Measurements, Model, Rect, SideOffsets, Size, Widget, UpdateCtx};
+use crate::{
+    align_boxes,
+    core2::{EventCtx, LayoutCtx, PaintCtx, WidgetPod},
+    event::{LifecycleEvent, PointerEventKind},
+    widget::Text,
+    Alignment, BoxConstraints, Environment, Event, Measurements, Model, Rect, SideOffsets, Size,
+    UpdateCtx, Widget,
+};
 use kyute_shell::drawing::{Brush, Color};
 use std::convert::TryFrom;
-use crate::event::LifecycleEvent;
 
-pub struct Button<T> {
-    label_text: String,
-    label: WidgetPod<String, Text>,
+pub struct Button<T: Model> {
+    label: WidgetPod<T, Text<T>>,
     on_click: Option<Box<dyn Fn(&mut EventCtx, &mut T)>>,
 }
 
-impl<T> Button<T> {
-    pub fn new(label_text: impl Into<String>) -> Button<T> {
+impl<T: Model> Button<T> {
+    pub fn new() -> Button<T> {
         Button {
-            label_text: label_text.into(),
             label: WidgetPod::new(Text::new()),
             on_click: None,
         }
@@ -24,24 +28,26 @@ impl<T: Model> Widget<T> for Button<T> {
         None
     }
 
-    fn lifecycle(&mut self, ctx: &mut EventCtx, lifecycle_event: &LifecycleEvent, data: &T) {
-        self.label.lifecycle(ctx, lifecycle_event, &self.label_text);
+    fn lifecycle(&mut self, ctx: &mut EventCtx, lifecycle_event: &LifecycleEvent, data: &mut T) {
+        self.label.lifecycle(ctx, lifecycle_event, data);
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {
+        self.label.update(ctx, data, change)
     }
 
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
-        _data: &T,
+        data: &mut T,
         env: &Environment,
     ) -> Measurements {
         // measure the label inside
         let padding = SideOffsets::new_all_same(4.0);
         let content_constraints = constraints.deflate(&padding);
 
-        let label_measurements = self
-            .label
-            .layout(ctx, content_constraints, &self.label_text, env);
+        let label_measurements = self.label.layout(ctx, content_constraints, data, env);
         let mut measurements = label_measurements;
 
         // add padding on the sides
@@ -61,7 +67,7 @@ impl<T: Model> Widget<T> for Button<T> {
         measurements
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, data: &mut T, env: &Environment) {
         let brush = Brush::solid_color(ctx, Color::new(0.100, 0.100, 0.100, 1.0));
         let fill = Brush::solid_color(ctx, Color::new(0.800, 0.888, 0.100, 1.0));
         if ctx.is_hovering() {

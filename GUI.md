@@ -868,3 +868,12 @@ Three things:
 - ambient data
 - properties (setters)
 - internal state
+
+# Nov 1 2021 update
+
+- reactive magic:
+   - needs lots of infrastructure, especially for collections
+   - uses replace_with, which is sketchy (aborts on panic)
+   - lots of proc-macro stuff to figure out, lots of unknowns (but seems viable)
+   - we may want to use immutable data structures anyway, so explicit changes might not even be useful in the end
+- 

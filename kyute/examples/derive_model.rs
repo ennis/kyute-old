@@ -53,8 +53,14 @@ impl<T: CounterLabel_Properties> Flex_Properties for CounterLabel_Data<T> {
 impl<T: CounterLabel_Properties> CounterLabel<T> {
     pub fn new() -> CounterLabel<T> {
         CounterLabel {
-            Flex::new()
-
+            state: Some(CounterLabel_State::new()),
+            inner: Flex::new()
+                .bind_axis(|_| Axis::Vertical)
+                .bind_items(|data, change, items| {
+                    items.push(Slider::new()
+                        .bind_min(|_| 0.0)
+                        .bind_value(|_| data.state.max_value))
+                })
         }
     }
 }
@@ -98,46 +104,6 @@ trait Slider_Properties {
     fn get_max(&self) -> f64;
     fn get_value(&self) -> f64;
     fn set_value(&mut self, v: f64) -> f64;
-}
-
-
-/*impl<T: CounterLabel_Properties> Slider_Properties for CounterLabel_Data<T> {
-    fn get_min(&self) -> f64 {
-        0.0
-    }
-
-    fn get_max(&self) -> f64 {
-        self.max_value
-    }
-
-    fn get_value(&self) -> f64 {
-        self.get_current_value()
-    }
-
-    fn set_value(&mut self, v: f64) {
-        self.set_current_value(v)
-    }
-}*/
-
-struct CounterLabel_Flex_Binder<T: CounterLabel_Properties>(Flex<CounterLabel_Data<T>>);
-
-impl<T: CounterLabel_Properties> Widget<CounterLabel_Data<T>> for CounterLabel_Flex_Binder<T> {
-
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut CounterLabel_Data<T>) -> Option<<CounterLabel_Data<T> as Model>::Change> {
-        self.0.event(ctx, event, data)
-    }
-
-    fn lifecycle(&mut self, ctx: &mut EventCtx, event: &LifecycleEvent, data: &mut CounterLabel_Data<T>) {
-        self.0.lifecycle(ctx, event, data)
-    }
-
-    fn layout(&mut self, ctx: &mut LayoutCtx, constraints: BoxConstraints, data: &mut CounterLabel_Data<T>, env: &Environment) -> Measurements {
-        self.0.layout(ctx, constraints, data, env)
-    }
-
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
-        self.0.paint(ctx, bounds, env)
-    }
 }
 
 fn main() {

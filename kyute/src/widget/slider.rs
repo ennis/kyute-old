@@ -1,10 +1,11 @@
 //! Sliders provide a way to make a value vary linearly between two bounds by dragging a knob along
 //! a line.
 use crate::{
+    binding::{DynLens, LensExt, ValueLens},
     event::{Event, LifecycleEvent, PointerEventKind},
     style::State,
-    theme, BoxConstraints, Environment, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect,
-    SideOffsets, Size, Widget,
+    theme, BoxConstraints, Environment, EventCtx, LayoutCtx, Lens, Measurements, Model, PaintCtx,
+    Point, Rect, SideOffsets, Size, UpdateCtx, Widget,
 };
 
 // TODO just pass f64 directly as the action?
@@ -73,44 +74,46 @@ impl Default for SliderTrack {
     ctx.fill_rectangle(knob, &knob_brush);
 }*/
 
-pub struct Slider {
+pub struct Slider<T> {
     track: SliderTrack,
-    value: f64,
-    min: f64,
-    max: f64,
+    value: DynLens<T, f64>,
+    min: DynLens<T, f64>,
+    max: DynLens<T, f64>,
 }
 
-impl Slider {
-    pub fn new(min: f64, max: f64, value: f64) -> Slider {
+fn normalize_value(value: f64, min: f64, max: f64) -> f64 {
+    (value - min) / (max - min)
+}
+
+impl<T: Model> Slider<T> {
+    pub fn new() -> Slider<T> {
         Slider {
             // endpoints calculated during layout
             track: Default::default(),
-            value: value.clamp(min, max),
-            min,
-            max,
+            value: Box::new(|| 0.0),
+            min: Box::new(|| 0.0),
+            max: Box::new(|| 1.0),
         }
     }
 
-    fn update_value(&mut self, cursor: Point) {
-        self.value = self.track.value_from_position(cursor, self.min, self.max);
-    }
+    /*fn update_value(&mut self, min: f64, max: f64, cursor: Point) {
+        self.value = self.track.value_from_position(cursor, min, max);
+    }*/
 
-    /// Returns the current value, normalized between 0 and 1.
-    fn value_norm(&self) -> f64 {
-        (self.value - self.min) / (self.max - self.min)
-    }
-
-    fn set_value(&mut self, value: f64) {
+    /*fn set_value(&mut self, value: f64) {
         self.value = value;
-    }
+    }*/
 }
 
-impl Widget<f64> for Slider {
+impl<T: Model> Widget<T> for Slider<T> {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
 
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut f64) -> Option<f64> {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut T) -> Option<T::Change> {
+        let min = self.min.get_owned(data);
+        let max = self.max.get_owned(data);
+
         match event {
             Event::Pointer(p) => match p.kind {
                 PointerEventKind::PointerOver | PointerEventKind::PointerOut => {
@@ -118,21 +121,17 @@ impl Widget<f64> for Slider {
                     None
                 }
                 PointerEventKind::PointerDown => {
-                    let new_value = self
-                        .track
-                        .value_from_position(p.position, self.min, self.max);
-                    *data = new_value;
+                    let new_value = self.track.value_from_position(p.position, min, max);
+                    self.value.set(data, new_value);
                     ctx.capture_pointer();
                     ctx.request_focus();
-                    Some(new_value)
+                    todo!()
                 }
                 PointerEventKind::PointerMove => {
                     if ctx.is_capturing_pointer() {
-                        let new_value = self
-                            .track
-                            .value_from_position(p.position, self.min, self.max);
-                        *data = new_value;
-                        Some(new_value)
+                        let new_value = self.track.value_from_position(p.position, min, max);
+                        self.value.set(data, new_value);
+                        todo!()
                     } else {
                         None
                     }
@@ -143,16 +142,20 @@ impl Widget<f64> for Slider {
         }
     }
 
-    fn lifecycle(&mut self, _ctx: &mut EventCtx, _lifecycle_event: &LifecycleEvent, _data: &f64) {
+    fn lifecycle(&mut self, _ctx: &mut EventCtx, _event: &LifecycleEvent, _data: &mut T) {
         // nothing
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx, data: &mut T, change: &T::Change) {
+        todo!()
     }
 
     fn layout(
         &mut self,
         ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
-        data: &f64,
-        env: &Environment,
+        _data: &mut T,
+        _env: &Environment,
     ) -> Measurements {
         let height = 14.0; //env.get(theme::SliderHeight);
         let knob_width = 11.0; //env.get(theme::SliderKnobWidth);
@@ -185,7 +188,11 @@ impl Widget<f64> for Slider {
         }
     }
 
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, data: &mut T, env: &Environment) {
+        let value = self.value.get_owned(data);
+        let min = self.min.get_owned(data);
+        let max = self.max.get_owned(data);
+
         let track_y = env.get(theme::SLIDER_TRACK_Y).unwrap_or_default();
         let track_h = env.get(theme::SLIDER_TRACK_HEIGHT).unwrap_or_default();
         let knob_w = env.get(theme::SLIDER_KNOB_WIDTH).unwrap_or_default();
@@ -203,7 +210,7 @@ impl Widget<f64> for Slider {
             Size::new(track_x_end - track_x_start, track_h),
         );
 
-        let kpos = self.track.knob_position(self.value_norm());
+        let kpos = self.track.knob_position(normalize_value(value, min, max));
         let kx = kpos.x.round() + 0.5;
 
         let knob_bounds = Rect::new(
