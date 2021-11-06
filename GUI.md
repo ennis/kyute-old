@@ -520,6 +520,7 @@ Could be:
 - somewhat error prone?
 
 ## Issues:
+
 ### Sending targeted events
 - e.g keyboard events to currently focused item
 
@@ -578,28 +579,31 @@ fn labeled_widget(label: &str) -> Widget {
     // Rotates the table entries in the current group so that a given call key marker
     // ends up in the current slot, then go to the next slot.
     // If the call key wasn't found, insert a call key tag.
-    Context::tagged_group(move || {
-        let mut changed = false;
-        changed |= Context::dirty_flag();
-        changed |= Context::changed(label);
+    Cache::group(move |dirty| {
+        let mut changed = dirty;
+        changed |= Cache::changed(label);
+        
+        let (value, slot) = Cache::expect::<Widget>();
 
         if !changed {
             // expect a widget
-            let value = Context::next_value::<Widget>();
-            // skip dependency group
-            Context::skip_to_end_of_group();
+            // skip child group
+            Cache::skip_to_end();
             value
         } else {
             // enter dependency group
             // we don't actually need to do a key search for the group here: either 
             // there's a group there, and enter it, or there's not, and create the group
-            Context::untagged_group(move || {
-                let mut slider_value = Context::state(|| 0.0);
+            let result = {
+                let mut slider_value = Cache::state(|| 0.0);
                 let slider = Slider::new(slider_value.get());
                 slider.on_change(|new_value| slider_value.set(new_value));
                 let label = Label::new(format!("{}_{}", label, slider_value.get()));
+                let invalidation_token = Cache::invalidation_token();
                 HBox::from([label, vbox]).into()
-            })
+            };
+            
+            Cache::set_value(slot, result);
         };
     })
 }
@@ -610,9 +614,9 @@ Translates into the following slot table:
     0: StartGroup(<labeled_widget@0>)
     1:     Value(String)   // label: &str
     2:     Value(Widget)   // return value of <labeled_widget>
-    3:     StartGroup(<labeled_widget@1>)  // dependency group of #2
-    4:         Value(...)
-    5:     EndGroup()
+    3:     // dependency group of #2
+    4:     Value(...)
+            ....
     6: EndGroup()
 
 
@@ -679,8 +683,6 @@ impl RowEditor {
         
     } 
 }
-
-
 ```
 
 Issues:
@@ -713,7 +715,7 @@ fn row_editor(row: &Row) -> (Widget, Row) {
 
 Options:
 
-1. State mutation happens during composition
+1. State mutation happens during composition => yes
    
 2. State mutation happens during event propagation, in event callbacks
     - complicated: what if we want to edit a smaller part of a bigger structure?
@@ -728,6 +730,13 @@ Two kinds of state:
 - state that is accessed only during recomp: most of the state
     - not too complicated
 - state that can be accessed and written outside of recomp (e.g. during event propagation) and that can invalidate values in the cache 
+
+# Sending events
+- Sending an event means:
+  - setting some interior widget state
+  - invalidating the dependent cache entries
+  - re-evaluating the widget function
+
 
 
 # The great UI challenges:

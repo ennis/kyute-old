@@ -167,7 +167,7 @@ impl Field<DataAttrs> {
             Some(ref f) => quote!(#f),
             None => {
                 let span = Span::call_site();
-                quote_spanned!(span=> druid::Data::same)
+                quote_spanned!(span=> #CRATE::Data::same)
             }
         }
     }

@@ -59,4 +59,9 @@ impl CallKeyStack {
     pub(crate) fn current(&self) -> CallKey {
         CallKey(*self.0.last().unwrap())
     }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
 }

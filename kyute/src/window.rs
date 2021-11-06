@@ -1,7 +1,7 @@
 use crate::{
-    core2::WidgetState, event::InputState, region::Region, BoxConstraints, Context, Environment,
-    Event, EventCtx, LayoutCtx, LayoutItem, Measurements, Offset, PaintCtx, Rect, Size, Widget,
-    WidgetDelegate,
+    composable, core2::WidgetState, event::InputState, region::Region, BoxConstraints,
+    Environment, Event, EventCtx, LayoutCtx, LayoutItem, Measurements, Offset, PaintCtx, Rect,
+    Size, Widget, WidgetDelegate,
 };
 use keyboard_types::KeyState;
 use kyute_shell::{
@@ -11,10 +11,13 @@ use kyute_shell::{
     winit,
     winit::event::{DeviceId, VirtualKeyCode, WindowEvent},
 };
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tracing::trace_span;
-use crate::composable;
 //use crate::context::State;
+use crate::application::AppCtx;
 use kyute_shell::winit::window::WindowBuilder;
 
 struct WindowState {
@@ -30,47 +33,40 @@ struct WindowState {
 
 /// A window managed by kyute.
 pub struct Window {
-    //window_state: State<WindowState>,
+    window_state: Arc<Mutex<WindowState>>,
     children: Vec<Widget>,
 }
 
 impl Window {
     #[composable(uncached)]
-    pub fn new(
-        window_builder: WindowBuilder,
-        children: Vec<Widget>,
-    ) -> Widget<Window> {
+    pub fn new(window_builder: WindowBuilder, children: Vec<Widget>) -> Widget<Window> {
+        // Get or create the internal widget state.
+        // we might have already called this function through the same call tree:
+        // in this case, it will return the same object.
 
-        // retained widget state: you need one to build a widget;
-        // it's also how you respond to events
-        let mut widget_state = Context::state(move || WidgetState::new());  // StateCell<WindowState>
+        // this is rewritten automatically so that the value is written back to the cache
+        // at the end of the scope. but it's otherwise accessible as an owned value.
 
-        // create the window (called only once)
-        /*let mut window_state = Context::state(move || {
-            WindowState {
-                window: None,
-                window_builder: Some(window_builder),
-                inputs: Default::default(),
-                scale_factor: 0.0,
-                invalid: Default::default(),
-                needs_layout: false,
-            }
-        }); // StateCell<WindowState>*/
+        /*#[state]
+        let mut window_state = WindowState {
+            window: None,
+            window_builder: Some(window_builder),
+            inputs: Default::default(),
+            scale_factor: 0.0,
+            invalid: Default::default(),
+            needs_layout: false,
+        };
 
-        // full mutable access to widget_state here: handle events, etc.
-        // full mutable access to window_state here: update it or whatever
+        // contains: widget ID
+        let widget_state = WidgetState::new();
 
-        /*let widget_state = widget_state.commit(); // convert to State<...>
-        let window_state = window_state.commit();*/
-
-        /*Widget::new(
-            widget_state.into(),        // writes back the
+        Widget::new(
+            widget_state.into(),
             Window {
-               // window_state: window_state.into(),
+                window_state: Arc::new(Mutex::new(window_state)),
                 children,
             },
         )*/
-
         todo!()
     }
 }
@@ -80,9 +76,13 @@ impl WidgetDelegate for Window {
         std::any::type_name::<Self>()
     }
 
-    /*fn mount(&self, app_ctx: &mut AppCtx) {
-
-    }*/
+    fn mount(&self, app_ctx: &mut AppCtx) {
+        /*let s = self.window_state.lock().unwrap();
+        s.window = Some(
+            PlatformWindow::new(app_ctx.event_loop, s.window_builder.take().unwrap(), None)
+                .unwrap(),
+        );*/
+    }
 
     fn layout(
         &self,
@@ -113,22 +113,3 @@ impl WidgetDelegate for Window {
         }
     }
 }
-
-/*
-pub struct Window<'a> {
-    builder: WindowBuilder,
-    contents: BoxedWidget<'a>,
-    callbacks: Callbacks,
-    parent_window: Option<&'a PlatformWindow>,
-}
-
-impl<'a> Window<'a> {
-    pub fn new(builder: WindowBuilder) -> Window<'a> {
-        Window {
-            builder,
-            contents: DummyWidget.boxed(),
-            callbacks: Callbacks::default(),
-            parent_window: None,
-        }
-    }
-}*/

@@ -3,7 +3,7 @@
 //! Provides the `run_application` function that opens the main window and translates the incoming
 //! events from winit into the events expected by a kyute [`NodeTree`](crate::node::NodeTree).
 
-use crate::{BoxConstraints, Context, Point, Widget, LayoutItem};
+use crate::{BoxConstraints, Point, Widget, LayoutItem};
 use keyboard_types::KeyState;
 use kyute_shell::{
     platform::Platform,
@@ -33,8 +33,6 @@ struct PendingAction {
     node: NodeId,
     payload: Box<dyn Any>,
 }*/
-
-
 
 /// Global application context. Contains stuff passed to all widget contexts (Event,Layout,Paint...)
 pub struct AppCtx {

@@ -59,15 +59,14 @@ pub enum MainAxisSize {
     Max,
 }
 
-
 pub struct Flex {
     axis: Axis,
     items: Vec<Widget>,
 }
 
 impl Flex {
-    pub fn new(axis: Axis, items: Vec<Widget>) -> Widget<Flex> {
-        todo!()
+    pub fn new(axis: Axis, items: Vec<Widget>) -> Flex {
+        Flex { axis, items }
     }
 
     pub fn push<T: WidgetDelegate + 'static>(&mut self, item: Widget<T>) {
@@ -76,7 +75,6 @@ impl Flex {
 }
 
 impl WidgetDelegate for Flex {
-
     fn layout(
         &self,
         ctx: &mut LayoutCtx,
@@ -130,23 +128,3 @@ impl WidgetDelegate for Flex {
         todo!()
     }
 }
-
-/*
-pub fn vbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
-    cx.enter(0);
-    flex(cx, Axis::Vertical, contents);
-    cx.exit();
-}
-
-pub fn hbox(cx: &mut CompositionCtx, contents: impl FnMut(&mut CompositionCtx)) {
-    cx.enter(0);
-    flex(cx, Axis::Horizontal, contents);
-    cx.exit();
-}
-
-pub fn flex(cx: &mut CompositionCtx, axis: Axis, contents: impl FnMut(&mut CompositionCtx)) {
-    cx.enter(0);
-    cx.emit_node(|cx| Flex::new(axis), |cx, _| {}, contents);
-    cx.exit();
-}
-*/

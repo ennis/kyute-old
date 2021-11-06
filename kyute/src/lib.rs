@@ -30,14 +30,15 @@ mod window;
 //mod style;
 
 pub use kyute_macros::composable;
+pub use kyute_macros::Data;
 
 pub use event::Event;
-pub use context::Context;
 pub use data::Data;
 pub use env::{EnvKey, EnvValue, Environment};
 pub use layout::{align_boxes, Alignment, BoxConstraints, Measurements, LayoutItem};
 pub use core2::{Widget, WidgetDelegate, LayoutCtx, PaintCtx, EventCtx};
 pub use window::Window;
+pub use cache::{Cache, CacheInvalidationToken};
 
 pub type Dip = kyute_shell::drawing::Dip;
 pub type Px = kyute_shell::drawing::Px;

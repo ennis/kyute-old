@@ -1,4 +1,11 @@
-use crate::{align_boxes, core2::{EventCtx, LayoutCtx, PaintCtx, WidgetState}, event::PointerEventKind, widget::Text, Alignment, BoxConstraints, Environment, Event, Measurements, Rect, SideOffsets, Size, Widget, WidgetDelegate, LayoutItem};
+use crate::{
+    align_boxes,
+    core2::{EventCtx, LayoutCtx, PaintCtx, WidgetState},
+    event::PointerEventKind,
+    widget::Text,
+    Alignment, BoxConstraints, Environment, Event, LayoutItem, Measurements, Rect, SideOffsets,
+    Size, Widget, WidgetDelegate,
+};
 use kyute_macros::composable;
 use kyute_shell::drawing::{Brush, Color};
 use std::convert::TryFrom;
@@ -11,21 +18,18 @@ pub struct Button {
 
 impl Button {
     #[composable(uncached)]
-    pub fn new(label: impl Into<String>) -> Widget<Button> {
-        let state = WidgetState {};
-        todo!()
+    pub fn new(label: impl Into<String>) -> Button {
+        Button {
+            label: Text::new(label),
+        }
     }
 }
-
-impl Widget<Button> {}
 
 pub enum ButtonAction {
     Clicked,
 }
 
 impl WidgetDelegate for Button {
-
-
     fn layout(
         &self,
         ctx: &mut LayoutCtx,

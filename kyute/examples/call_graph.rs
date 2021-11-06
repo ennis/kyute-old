@@ -1,8 +1,8 @@
 use kyute::{
     application, composable,
-    widget::{Axis, Button, Flex},
-    BoxConstraints, Context, Data, Environment, Event, LayoutCtx, Measurements, PaintCtx, Rect,
-    Widget, WidgetDelegate, Window,
+    widget::{Axis, Button, Flex, Text},
+    BoxConstraints, Cache, CacheInvalidationToken, Data, Environment, Event, LayoutCtx,
+    Measurements, PaintCtx, Rect, Widget, WidgetDelegate, Window,
 };
 use kyute_shell::{platform::Platform, winit::window::WindowBuilder};
 use std::sync::Arc;
@@ -22,6 +22,42 @@ fn vbox() -> Widget<Flex> {
     todo!()
 }
 
+#[derive(Clone,Data)]
+struct AppState {
+    items: Arc<Vec<u32>>,
+    value: f64,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        AppState {
+            items: Arc::new(vec![]),
+            value: 0.0,
+        }
+    }
+}
+
+#[composable]
+fn ui_function() -> (Widget, CacheInvalidationToken) {
+    Cache::with_state(
+        || AppState::default(),
+        move |app_state| {
+            eprintln!("recomputing ui_function");
+            let add_item_button = Button::new("Add Item");
+
+            let mut items_row = vec![];
+            items_row.push(Widget::new(add_item_button).into());
+            for item in app_state.items.iter() {
+                let label = Text::new(format!("{}", item));
+                items_row.push(Widget::new(label).into());
+            }
+
+            let invalidation_token = Cache::get_invalidation_token();
+            let widget = Widget::new(Flex::new(Axis::Vertical, items_row)).into();
+            (widget, invalidation_token)
+        },
+    )
+}
 
 fn main() {
     let platform = Platform::new();
@@ -34,7 +70,17 @@ fn main() {
         //.with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
         .init();
 
-    application::run(|| root().into());
+    let mut ui_cache = Cache::new();
+
+    eprintln!("running ui_function...");
+    let (widget1, invalidation_token) = ui_cache.run(ui_function);
+    eprintln!("running ui_function...");
+    let (widget2, invalidation_token) = ui_cache.run(ui_function);
+    assert!(widget1.same(&widget2));
+    ui_cache.invalidate(invalidation_token);
+    eprintln!("running ui_function...");
+    let (widget3, invalidation_token) = ui_cache.run(ui_function);
+    assert!(!widget3.same(&widget2));
 
     Platform::shutdown();
 }

@@ -1,9 +1,10 @@
 use crate::{
+    application::AppCtx,
     cache_cell::CacheCell,
     event::{InputState, PointerEvent},
     layout::LayoutItem,
     region::Region,
-    BoxConstraints, Context, Data, Environment, Event, Measurements, Offset, Point, Rect, Size,
+    BoxConstraints, Data, Environment, Event, Measurements, Offset, Point, Rect, Size,
 };
 use kyute_macros::composable;
 use kyute_shell::{drawing::DrawContext, winit::window::WindowId};
@@ -142,6 +143,7 @@ impl EventCtx {
 pub struct WindowPaintCtx {}
 
 /// Internal widget state.
+/// Currently empty.
 #[derive(Clone)]
 pub struct WidgetState {}
 
@@ -164,6 +166,12 @@ pub struct Widget<T: ?Sized = dyn WidgetDelegate>(Arc<WidgetInner<T>>);
 impl<T: ?Sized> Clone for Widget<T> {
     fn clone(&self) -> Self {
         Widget(self.0.clone())
+    }
+}
+
+impl<T: ?Sized+'static> Data for Widget<T> {
+    fn same(&self, other: &Self) -> bool {
+        self.0.same(&other.0)
     }
 }
 
@@ -190,12 +198,20 @@ impl<T: ?Sized + WidgetDelegate> Widget<T> {
     }
 }
 
+impl<T: WidgetDelegate> Widget<T> {
+    pub fn new(delegate: T) -> Widget<T> {
+        Widget(Arc::new(WidgetInner { delegate }))
+    }
+}
+
 /// Trait that defines the behavior of a widget.
 pub trait WidgetDelegate {
     /// Implement to give a debug name to your widget. Used only for debugging.
     fn debug_name(&self) -> &str {
         "WidgetDelegate"
     }
+
+    fn mount(&self, ctx: &mut AppCtx) {}
 
     /// Called to measure this widget and layout the children of this widget.
     fn layout(

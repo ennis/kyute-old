@@ -46,7 +46,7 @@ pub fn generate_composable(
         quote! {
             #[track_caller]
             #(#attrs)* #vis #sig {
-                ::#CRATE::Context::scoped(0, move || #return_type {
+                ::#CRATE::Cache::scoped(0, move || #return_type {
                     #orig_block
                 })
             }
@@ -62,17 +62,20 @@ pub fn generate_composable(
                     syn::Error::new(r.span(), "methods cannot be cached `composable` functions: consider using `composable(uncached)`")
                         .to_compile_error()
                 }
-                FnArg::Typed(arg) => arg.pat.to_token_stream(),
+                FnArg::Typed(arg) => {
+                    let pat = &arg.pat;
+                    quote! {
+                        #pat.clone()
+                    }
+                },
             })
             .collect();
 
         quote! {
             #[track_caller]
             #(#attrs)* #vis #sig {
-                ::#CRATE::Context::scoped(0, move || {
-                    ::#CRATE::Context::cache((#(#args,)*), move || #return_type {
-                        #orig_block
-                    })
+                ::#CRATE::Cache::memoize((#(#args,)*), move || #return_type {
+                    #orig_block
                 })
             }
         }
