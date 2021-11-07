@@ -724,6 +724,12 @@ Options:
         - if we use lenses now, we might as well use druid's approach directly: it's cleaner and more principled
         - just use some macro magic on top to make lens composition more palatable
 
+Should `Button::new` return `Button` or `Widget<Button>`.
+Considerations:
+- containers always take `Widget<dyn WidgetDelegate>`
+
+-> containers themselves should create the `WidgetPod`
+
 
 # External state
 Two kinds of state:

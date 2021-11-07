@@ -2,23 +2,23 @@ use kyute::{
     application, composable,
     widget::{Axis, Button, Flex, Text},
     BoxConstraints, Cache, CacheInvalidationToken, Data, Environment, Event, LayoutCtx,
-    Measurements, PaintCtx, Rect, Widget, WidgetDelegate, Window,
+    Measurements, PaintCtx, Rect, WidgetPod, Widget, Window,
 };
 use kyute_shell::{platform::Platform, winit::window::WindowBuilder};
 use std::sync::Arc;
 
 #[composable(uncached)]
-fn root() -> Widget<Window> {
+fn root() -> WidgetPod<Window> {
     window()
 }
 
 #[composable(uncached)]
-fn window() -> Widget<Window> {
+fn window() -> WidgetPod<Window> {
     todo!()
 }
 
 #[composable(uncached)]
-fn vbox() -> Widget<Flex> {
+fn vbox() -> WidgetPod<Flex> {
     todo!()
 }
 
@@ -38,23 +38,30 @@ impl Default for AppState {
 }
 
 #[composable]
-fn ui_function() -> (Widget, CacheInvalidationToken) {
+fn ui_function() -> (WidgetPod, CacheInvalidationToken) {
     Cache::with_state(
         || AppState::default(),
         move |app_state| {
             eprintln!("recomputing ui_function");
+
             let add_item_button = Button::new("Add Item");
 
-            let mut items_row = vec![];
-            items_row.push(Widget::new(add_item_button).into());
-            for item in app_state.items.iter() {
-                let label = Text::new(format!("{}", item));
-                items_row.push(Widget::new(label).into());
+            // if we want to be able to do this, add_item_button must contain some kind of link
+            // already
+            if add_item_button.clicked() {
+                Arc::make_mut(&mut app_state.items).push(app_state.items.len() as u32);
             }
 
+            let mut rows = vec![];
+            rows.extend(app_state.items.iter().map(|item| {
+                Text::new(format!("{}", item)).into()
+            }));
+            rows.push(add_item_button.into());
+
+            let flex = Flex::new(Axis::Vertical, rows);
+
             let invalidation_token = Cache::get_invalidation_token();
-            let widget = Widget::new(Flex::new(Axis::Vertical, items_row)).into();
-            (widget, invalidation_token)
+            (flex, invalidation_token)
         },
     )
 }

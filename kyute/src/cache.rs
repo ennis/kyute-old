@@ -14,6 +14,7 @@ use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
     mem::ManuallyDrop,
+    num::NonZeroU64,
     panic::Location,
     sync::Arc,
 };
@@ -679,6 +680,12 @@ impl CacheWriter {
 #[derive(Copy, Clone, Debug)]
 pub struct CacheInvalidationToken {
     key: GroupKey,
+}
+
+impl CacheInvalidationToken {
+    pub(crate) fn to_u64(&self) -> u64 {
+        self.key.0.as_ffi()
+    }
 }
 
 struct CacheContext {

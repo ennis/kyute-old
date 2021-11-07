@@ -3,7 +3,7 @@
 //! Provides the `run_application` function that opens the main window and translates the incoming
 //! events from winit into the events expected by a kyute [`NodeTree`](crate::node::NodeTree).
 
-use crate::{BoxConstraints, Point, Widget, LayoutItem};
+use crate::{BoxConstraints, Point, WidgetPod, LayoutItem, Cache, CacheInvalidationToken};
 use keyboard_types::KeyState;
 use kyute_shell::{
     platform::Platform,
@@ -37,7 +37,8 @@ struct PendingAction {
 /// Global application context. Contains stuff passed to all widget contexts (Event,Layout,Paint...)
 pub struct AppCtx {
     /// Open windows, mapped to their corresponding widget.
-    pub(crate) windows: HashMap<WindowId, Widget>,
+    pub(crate) windows: HashMap<WindowId, WidgetPod>,
+    cache: Cache,
     /*/// Events waiting to be delivered
     pending_events: Vec<PendingEvent>,
     /// Actions emitted by widgets waiting to be processed.
@@ -51,6 +52,7 @@ impl AppCtx {
     fn new() -> AppCtx {
         AppCtx {
             windows: HashMap::new(),
+            cache: Cache::new()
             //pending_events: vec![],
             //pending_actions: vec![],
             //needs_relayout: false,
@@ -61,7 +63,7 @@ impl AppCtx {
 
     /// Registers a widget as a native window widget.
     /// The event loop will call `window_event` whenever an event targeting the window is received.
-    pub(crate) fn register_window_widget(&mut self, window_id: WindowId, widget: Widget) {
+    pub(crate) fn register_window_widget(&mut self, window_id: WindowId, widget: WidgetPod) {
         match self.windows.entry(window_id) {
             Entry::Occupied(_) => {
                 warn!("window id {:?} already registered", window_id);
@@ -72,8 +74,12 @@ impl AppCtx {
         }
     }
 
-    pub(crate) fn find_window_widget(&self, window_id: WindowId) -> Option<Widget> {
+    pub(crate) fn find_window_widget(&self, window_id: WindowId) -> Option<WidgetPod> {
         self.windows.get(&window_id).cloned()
+    }
+
+    pub(crate) fn invalidate_cache(&mut self, token: CacheInvalidationToken) {
+        self.cache.invalidate(token)
     }
 
     /*pub(crate) fn post_action(&mut self, node: NodeId, payload: Box<dyn Any>) {
@@ -98,7 +104,7 @@ impl AppCtx {
 }
 
 
-fn get_root_widget(root_widget_fn: fn() -> Widget) -> Widget {
+fn get_root_widget(root_widget_fn: fn() -> WidgetPod) -> WidgetPod {
     root_widget_fn()
 }
 
@@ -110,7 +116,7 @@ fn get_root_widget(root_widget_fn: fn() -> Widget) -> Widget {
                    |root| { });
 }*/
 
-pub fn run(root_widget_fn: fn() -> Widget) {
+pub fn run(root_widget_fn: fn() -> WidgetPod) {
 
     let root_widget = root_widget_fn();
 

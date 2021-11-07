@@ -1,10 +1,13 @@
 use crate::{
     application::AppCtx,
+    bloom::Bloom,
     cache_cell::CacheCell,
+    call_key::CallKey,
     event::{InputState, PointerEvent},
     layout::LayoutItem,
     region::Region,
-    BoxConstraints, Data, Environment, Event, Measurements, Offset, Point, Rect, Size,
+    BoxConstraints, Cache, CacheInvalidationToken, Data, Environment, Event, InternalEvent,
+    Measurements, Offset, Point, Rect, Size,
 };
 use kyute_macros::composable;
 use kyute_shell::{drawing::DrawContext, winit::window::WindowId};
@@ -13,6 +16,7 @@ use std::{
     fmt,
     fmt::Formatter,
     hash::{Hash, Hasher},
+    num::NonZeroU64,
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex, Weak},
 };
@@ -77,12 +81,15 @@ impl<'a> DerefMut for PaintCtx<'a> {
     }
 }
 
-pub struct EventCtx {
-    //pub(crate) focus_request: WeakWidgetRef,
+pub struct EventCtx<'a> {
+    app_ctx: &'a mut AppCtx,
+    pub(crate) child_filter: Bloom<WidgetId>,
 }
 
 impl EventCtx {
-    pub fn enqueue_action(&mut self) {}
+    pub fn invalidate(&mut self, token: CacheInvalidationToken) {
+        self.app_ctx.invalidate_cache(token)
+    }
 
     /// Returns the bounds of the current widget.
     // TODO in what space?
@@ -142,46 +149,141 @@ impl EventCtx {
 
 pub struct WindowPaintCtx {}
 
-/// Internal widget state.
-/// Currently empty.
-#[derive(Clone)]
-pub struct WidgetState {}
+/// Trait that defines the behavior of a widget.
+pub trait Widget {
+    /// Implement to give a debug name to your widget. Used only for debugging.
+    fn debug_name(&self) -> &str {
+        "WidgetDelegate"
+    }
 
-impl WidgetState {
-    pub fn new() -> WidgetState {
-        WidgetState {}
+    /// Propagates an event through the widget hierarchy.
+    fn event(&self, ctx: &mut EventCtx, event: &Event);
+
+    /// Measures this widget and layouts the children of this widget.
+    fn layout(
+        &self,
+        ctx: &mut LayoutCtx,
+        constraints: BoxConstraints,
+        env: &Environment,
+    ) -> LayoutItem;
+
+    /// Paints the widget in the given context.
+    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment);
+
+    /// Called only for native window widgets.
+    fn window_paint(&self, _ctx: &mut WindowPaintCtx) {}
+
+    /// Returns `true` if the widget is fully opaque when drawn, `false` if it is semitransparent.
+    /// This is mostly used as an optimization: if a semitransparent widget needs to be redrawn,
+    /// its background (and thus the parent
+    fn is_opaque(&self) -> bool {
+        false
     }
 }
 
-pub struct WidgetInner<T: ?Sized> {
-    // Widget retained state.
-    //state: State<WidgetState>,
-    /// Widget delegate
+/// Internal widget state.
+/// Currently empty.
+struct WidgetState {
+    // TODO
+}
+
+#[derive(Clone, Data)]
+pub struct WidgetHandle {
+    token: CacheInvalidationToken,
+    state: Arc<RefCell<WidgetState>>,
+}
+
+impl WidgetHandle {
+    #[composable]
+    pub fn new() -> WidgetHandle {
+        let token = Cache::get_invalidation_token();
+        let state = Arc::new(RefCell::new(WidgetState {}));
+        WidgetHandle { token, state }
+    }
+}
+
+/// ID of a node in the tree.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct WidgetId(CallKey);
+
+impl WidgetId {
+    pub(crate) fn from_call_key(key: CallKey) -> WidgetId {
+        WidgetId(key)
+    }
+}
+
+impl fmt::Debug for WidgetId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:04X}", self.0.get())
+    }
+}
+
+struct WidgetInner<T: ?Sized> {
+    id: WidgetId,
+    child_filter: Bloom<WidgetId>,
     delegate: T,
 }
 
-/// Represents a widget.
-pub struct Widget<T: ?Sized = dyn WidgetDelegate>(Arc<WidgetInner<T>>);
+fn compute_child_filter<T: Widget>(delegate: &T) -> Bloom<WidgetId> {
+    let mut ctx = EventCtx {
+        child_filter: Default::default(),
+    };
+    delegate.event(&mut ctx, &Event::Internal(InternalEvent::UpdateChildren));
+    ctx.child_filter
+}
 
-impl<T: ?Sized> Clone for Widget<T> {
-    fn clone(&self) -> Self {
-        Widget(self.0.clone())
+/// Represents a widget.
+pub struct WidgetPod<T: ?Sized = dyn Widget>(Arc<WidgetInner<T>>);
+
+impl<T: Widget> WidgetPod<T> {
+    #[composable(uncached)]
+    pub fn new(delegate: T) -> WidgetPod<T> {
+        let child_filter = compute_child_filter(&delegate);
+        let id = WidgetId::from_call_key(Cache::current_call_key());
+        let inner = WidgetInner {
+            id,
+            child_filter,
+            delegate,
+        };
+        WidgetPod(Arc::new(inner))
     }
 }
 
-impl<T: ?Sized+'static> Data for Widget<T> {
+impl<T: ?Sized> Clone for WidgetPod<T> {
+    fn clone(&self) -> Self {
+        WidgetPod(self.0.clone())
+    }
+}
+
+impl<T: ?Sized + 'static> Data for WidgetPod<T> {
     fn same(&self, other: &Self) -> bool {
         self.0.same(&other.0)
     }
 }
 
-impl<T: WidgetDelegate + 'static> From<Widget<T>> for Widget {
-    fn from(widget: Widget<T>) -> Self {
-        Widget(widget.0)
+impl<T: Widget + 'static> From<WidgetPod<T>> for WidgetPod {
+    fn from(widget: WidgetPod<T>) -> Self {
+        WidgetPod(widget.0)
     }
 }
 
-impl<T: ?Sized + WidgetDelegate> Widget<T> {
+impl<T: ?Sized + Widget> WidgetPod<T> {
+    /// Propagates an event to the wrapped widget.
+    pub fn event(&self, parent_ctx: &mut EventCtx, event: &Event) {
+        // Handle internal events
+        match event {
+            Event::Internal(InternalEvent::UpdateChildren) => {
+                parent_ctx.child_filter.extend(&self.0.child_filter);
+                parent_ctx.child_filter.add(&self.0.id);
+                return;
+            }
+            _ => {}
+        }
+
+        self.inner.event(&mut ctx, event, data)
+    }
+
     /// Called to measure this widget and layout the children of this widget.
     pub fn layout(
         &self,
@@ -195,42 +297,5 @@ impl<T: ?Sized + WidgetDelegate> Widget<T> {
 
     pub fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
         self.0.delegate.paint(ctx, bounds, env)
-    }
-}
-
-impl<T: WidgetDelegate> Widget<T> {
-    pub fn new(delegate: T) -> Widget<T> {
-        Widget(Arc::new(WidgetInner { delegate }))
-    }
-}
-
-/// Trait that defines the behavior of a widget.
-pub trait WidgetDelegate {
-    /// Implement to give a debug name to your widget. Used only for debugging.
-    fn debug_name(&self) -> &str {
-        "WidgetDelegate"
-    }
-
-    fn mount(&self, ctx: &mut AppCtx) {}
-
-    /// Called to measure this widget and layout the children of this widget.
-    fn layout(
-        &self,
-        ctx: &mut LayoutCtx,
-        constraints: BoxConstraints,
-        env: &Environment,
-    ) -> LayoutItem;
-
-    /// Called to paint the widget
-    fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment);
-
-    /// Called only for native window widgets.
-    fn window_paint(&self, _ctx: &mut WindowPaintCtx) {}
-
-    /// Returns `true` if the widget is fully opaque when drawn, `false` if it is semitransparent.
-    /// This is mostly used as an optimization: if a semitransparent widget needs to be redrawn,
-    /// its background (and thus the parent
-    fn is_opaque(&self) -> bool {
-        false
     }
 }

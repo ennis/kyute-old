@@ -1,8 +1,4 @@
-use crate::{
-    composable, core2::WidgetState, event::InputState, region::Region, BoxConstraints,
-    Environment, Event, EventCtx, LayoutCtx, LayoutItem, Measurements, Offset, PaintCtx, Rect,
-    Size, Widget, WidgetDelegate,
-};
+use crate::{composable, core2::WidgetState, event::InputState, region::Region, BoxConstraints, Environment, Event, EventCtx, LayoutCtx, LayoutItem, Measurements, Offset, PaintCtx, Rect, Size, WidgetPod, Widget, Cache};
 use keyboard_types::KeyState;
 use kyute_shell::{
     drawing::Color,
@@ -15,10 +11,12 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+use std::cell::RefCell;
 use tracing::trace_span;
 //use crate::context::State;
 use crate::application::AppCtx;
 use kyute_shell::winit::window::WindowBuilder;
+use crate::core2::WidgetHandle;
 
 struct WindowState {
     window: Option<PlatformWindow>,
@@ -33,13 +31,14 @@ struct WindowState {
 
 /// A window managed by kyute.
 pub struct Window {
-    window_state: Arc<Mutex<WindowState>>,
-    children: Vec<Widget>,
+    window_state: Arc<RefCell<WindowState>>,
+    children: Vec<WidgetPod>,
 }
 
 impl Window {
     #[composable(uncached)]
-    pub fn new(window_builder: WindowBuilder, children: Vec<Widget>) -> Widget<Window> {
+    pub fn new(window_builder: WindowBuilder, children: Vec<WidgetPod>) -> Window {
+
         // Get or create the internal widget state.
         // we might have already called this function through the same call tree:
         // in this case, it will return the same object.
@@ -47,41 +46,27 @@ impl Window {
         // this is rewritten automatically so that the value is written back to the cache
         // at the end of the scope. but it's otherwise accessible as an owned value.
 
-        /*#[state]
-        let mut window_state = WindowState {
-            window: None,
-            window_builder: Some(window_builder),
-            inputs: Default::default(),
-            scale_factor: 0.0,
-            invalid: Default::default(),
-            needs_layout: false,
-        };
+        let window_state = Cache::memoize((), move || {
+            Arc::new(RefCell::new(WindowState {
+                window: None,
+                window_builder: Some(window_builder),
+                inputs: Default::default(),
+                scale_factor: 0.0,
+                invalid: Default::default(),
+                needs_layout: true
+            }))
+        });
 
-        // contains: widget ID
-        let widget_state = WidgetState::new();
-
-        Widget::new(
-            widget_state.into(),
-            Window {
-                window_state: Arc::new(Mutex::new(window_state)),
-                children,
-            },
-        )*/
-        todo!()
+        Window {
+            window_state,
+            children
+        }
     }
 }
 
-impl WidgetDelegate for Window {
+impl Widget for Window {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
-    }
-
-    fn mount(&self, app_ctx: &mut AppCtx) {
-        /*let s = self.window_state.lock().unwrap();
-        s.window = Some(
-            PlatformWindow::new(app_ctx.event_loop, s.window_builder.take().unwrap(), None)
-                .unwrap(),
-        );*/
     }
 
     fn layout(

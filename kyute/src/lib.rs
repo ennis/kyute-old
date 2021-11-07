@@ -32,11 +32,11 @@ mod window;
 pub use kyute_macros::composable;
 pub use kyute_macros::Data;
 
-pub use event::Event;
+pub use event::{Event, InternalEvent};
 pub use data::Data;
 pub use env::{EnvKey, EnvValue, Environment};
 pub use layout::{align_boxes, Alignment, BoxConstraints, Measurements, LayoutItem};
-pub use core2::{Widget, WidgetDelegate, LayoutCtx, PaintCtx, EventCtx};
+pub use core2::{WidgetPod, Widget, LayoutCtx, PaintCtx, EventCtx};
 pub use window::Window;
 pub use cache::{Cache, CacheInvalidationToken};
 

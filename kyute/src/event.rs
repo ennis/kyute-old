@@ -120,6 +120,11 @@ pub enum MoveFocusDirection {
     After,
 }
 
+#[derive(Clone,Debug,PartialEq)]
+pub enum InternalEvent {
+    UpdateChildren,
+}
+
 /// Events.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -131,6 +136,7 @@ pub enum Event {
     Keyboard(KeyboardEvent),
     /// A composition event.
     Composition(CompositionEvent),
+    Internal(InternalEvent)
 }
 
 impl Event {

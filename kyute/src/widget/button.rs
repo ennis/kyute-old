@@ -1,26 +1,31 @@
 use crate::{
     align_boxes,
-    core2::{EventCtx, LayoutCtx, PaintCtx, WidgetState},
+    core2::{EventCtx, LayoutCtx, PaintCtx, WidgetHandle},
     event::PointerEventKind,
     widget::Text,
-    Alignment, BoxConstraints, Environment, Event, LayoutItem, Measurements, Rect, SideOffsets,
-    Size, Widget, WidgetDelegate,
+    Alignment, BoxConstraints, Cache, CacheInvalidationToken, Environment, Event, LayoutItem,
+    Measurements, Rect, SideOffsets, Size, Widget, WidgetPod,
 };
 use kyute_macros::composable;
 use kyute_shell::drawing::{Brush, Color};
-use std::convert::TryFrom;
+use std::{cell::Cell, convert::TryFrom, sync::Arc};
 
 #[derive(Clone)]
 pub struct Button {
     label: Text,
-    //action_queue: ActionQueue<ButtonAction>,
+    token: CacheInvalidationToken,
+    clicked: Arc<Cell<bool>>,
 }
+
+// Box<Arc<Cell<bool>>
 
 impl Button {
     #[composable(uncached)]
     pub fn new(label: impl Into<String>) -> Button {
         Button {
             label: Text::new(label),
+            token: Cache::get_invalidation_token(),
+            clicked: Arc::new(Cell::new(false)),
         }
     }
 }
@@ -29,7 +34,30 @@ pub enum ButtonAction {
     Clicked,
 }
 
-impl WidgetDelegate for Button {
+impl Widget for Button {
+    fn event(&self, ctx: &mut EventCtx, event: &Event) {
+        match event {
+            Event::Pointer(p) => match p.kind {
+                PointerEventKind::PointerDown => {
+                    tracing::trace!("button clicked");
+                    self.clicked.set(true);
+                    ctx.invalidate(self.token);
+                    ctx.request_focus();
+                    ctx.request_redraw();
+                    ctx.set_handled();
+                }
+                PointerEventKind::PointerOver => {
+                    ctx.request_redraw();
+                }
+                PointerEventKind::PointerOut => {
+                    ctx.request_redraw();
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
     fn layout(
         &self,
         ctx: &mut LayoutCtx,

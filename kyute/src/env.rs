@@ -1,4 +1,4 @@
-use crate::{data::Data, SideOffsets, Widget};
+use crate::{data::Data, SideOffsets, WidgetPod};
 use kyute_shell::{
     drawing::Color,
     text::{TextFormat, TextLayout},

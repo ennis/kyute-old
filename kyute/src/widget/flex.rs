@@ -1,7 +1,7 @@
 use crate::{
     core2::{LayoutCtx, PaintCtx, WidgetState},
     BoxConstraints, Environment, Event, EventCtx, LayoutItem, Measurements, Offset, Rect, Size,
-    Widget, WidgetDelegate,
+    WidgetPod, Widget,
 };
 use tracing::trace;
 
@@ -61,20 +61,29 @@ pub enum MainAxisSize {
 
 pub struct Flex {
     axis: Axis,
-    items: Vec<Widget>,
+    items: Vec<WidgetPod>,
 }
 
 impl Flex {
-    pub fn new(axis: Axis, items: Vec<Widget>) -> Flex {
-        Flex { axis, items }
+    pub fn new(axis: Axis) -> Flex {
+        Flex { axis, items: vec![] }
     }
 
-    pub fn push<T: WidgetDelegate + 'static>(&mut self, item: Widget<T>) {
-        self.items.push(item.into())
+    // needs to be composable because it's creating the pod here
+    #[composable(uncached)]
+    pub fn push<T: Widget + 'static>(&mut self, item: T) {
+        self.items.push(WidgetPod::new(item.into))
     }
 }
 
-impl WidgetDelegate for Flex {
+impl Widget for Flex {
+
+    fn event(&self, ctx: &mut EventCtx, event: &Event) {
+         for item in self.items.iter() {
+             item.event(ctx, event);
+         }
+    }
+
     fn layout(
         &self,
         ctx: &mut LayoutCtx,

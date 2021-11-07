@@ -1,5 +1,5 @@
 //! Text elements
-use crate::{env::Environment, event::Event, BoxConstraints, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect, WidgetDelegate, LayoutItem};
+use crate::{env::Environment, event::Event, BoxConstraints, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect, Widget, LayoutItem};
 use kyute_shell::{
     drawing::{Brush, Color, DrawTextOptions},
     text::{TextFormatBuilder, TextLayout},
@@ -26,7 +26,7 @@ impl Text {
     }
 }
 
-impl WidgetDelegate for Text {
+impl Widget for Text {
     fn debug_name(&self) -> &str {
         std::any::type_name::<Self>()
     }
