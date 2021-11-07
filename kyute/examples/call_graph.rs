@@ -1,8 +1,8 @@
 use kyute::{
     application, composable,
     widget::{Axis, Button, Flex, Text},
-    BoxConstraints, Cache, CacheInvalidationToken, Data, Environment, Event, LayoutCtx,
-    Measurements, PaintCtx, Rect, WidgetPod, Widget, Window,
+    BoxConstraints, Cache, Data, Environment, Event, LayoutCtx, Measurements, PaintCtx, Rect,
+    Widget, WidgetPod, Window,
 };
 use kyute_shell::{platform::Platform, winit::window::WindowBuilder};
 use std::sync::Arc;
@@ -22,7 +22,7 @@ fn vbox() -> WidgetPod<Flex> {
     todo!()
 }
 
-#[derive(Clone,Data)]
+#[derive(Clone, Data)]
 struct AppState {
     items: Arc<Vec<u32>>,
     value: f64,
@@ -38,30 +38,29 @@ impl Default for AppState {
 }
 
 #[composable]
-fn ui_function() -> (WidgetPod, CacheInvalidationToken) {
+fn ui_function() -> WidgetPod {
     Cache::with_state(
         || AppState::default(),
         move |app_state| {
             eprintln!("recomputing ui_function");
 
-            let add_item_button = Button::new("Add Item");
-
-            // if we want to be able to do this, add_item_button must contain some kind of link
-            // already
+            // "Add Item"
+            let add_item_button = Button::new("Add Item".to_string());
             if add_item_button.clicked() {
-                Arc::make_mut(&mut app_state.items).push(app_state.items.len() as u32);
+                let new_item = app_state.items.len() as u32;
+                Arc::make_mut(&mut app_state.items).push(new_item);
             }
 
-            let mut rows = vec![];
-            rows.extend(app_state.items.iter().map(|item| {
-                Text::new(format!("{}", item)).into()
-            }));
-            rows.push(add_item_button.into());
+            // List of items
+            let mut item_list = vec![];
+            for item in app_state.items.iter() {
+                item_list.push(Text::new(format!("{}", item)).into());
+            }
+            item_list.push(add_item_button.into());
+            let flex = Flex::new(Axis::Vertical, item_list).into();
 
-            let flex = Flex::new(Axis::Vertical, rows);
-
-            let invalidation_token = Cache::get_invalidation_token();
-            (flex, invalidation_token)
+            // enclosing window
+            Window::new(WindowBuilder::new().with_title("hello"), flex).into()
         },
     )
 }
@@ -77,42 +76,9 @@ fn main() {
         //.with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
         .init();
 
-    let mut ui_cache = Cache::new();
-
-    eprintln!("running ui_function...");
-    let (widget1, invalidation_token) = ui_cache.run(ui_function);
-    eprintln!("running ui_function...");
-    let (widget2, invalidation_token) = ui_cache.run(ui_function);
-    assert!(widget1.same(&widget2));
-    ui_cache.invalidate(invalidation_token);
-    eprintln!("running ui_function...");
-    let (widget3, invalidation_token) = ui_cache.run(ui_function);
-    assert!(!widget3.same(&widget2));
-
+    application::run(ui_function);
     Platform::shutdown();
 }
-
-/*List::new(|| {
-    Flex::row()
-        .with_child(
-            Label::new(|(_, item): &(Vector<u32>, u32), _env: &_| {
-                format!("List item #{}", item)
-            })
-        )
-        .with_child(
-            Button::new("Delete")
-                .on_click(|_ctx, (shared, item): &mut (Vector<u32>, u32), _env| {
-                    shared.retain(|v| v != item);
-                })
-        )
-}))
-.vertical()
-.lens(lens::Id.map(
-    |d: &AppData| (d.right.clone(), d.right.clone()),
-    |d: &mut AppData, x: (Vector<u32>, Vector<u32>)| {
-        d.right = x.0
-    },
-)*/
 
 // issue: how do you write a composable function that focuses "down" on some state but retains
 // the ability to modify it?

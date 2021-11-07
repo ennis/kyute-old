@@ -1,6 +1,6 @@
 use crate::{
-    call_key::{CallKey, CallKeyStack},
-    data::Data,
+    call_key::{CallId, CallIdStack},
+    Data,
 };
 use slotmap::SlotMap;
 use std::{
@@ -11,6 +11,8 @@ use std::{
         HashMap,
     },
     convert::TryInto,
+    fmt,
+    fmt::Formatter,
     hash::{Hash, Hasher},
     marker::PhantomData,
     mem::ManuallyDrop,
@@ -21,22 +23,13 @@ use std::{
 use thiserror::Error;
 use tracing::trace;
 
-// - each cache entry can be uniquely identified by its call key
-// - if calling from a generic get<T> function, if the call key is the same, the type is known to be T
-// - it's important that the lookup be fast
-
 slotmap::new_key_type! {
-    pub struct GroupKey;
-}
-
-struct Group {
-    parent: Option<GroupKey>,
-    dirty: bool,
+    struct CacheEntryKey;
 }
 
 /// Error related to state entries.
 #[derive(Error, Debug)]
-pub enum CacheEntryError {
+pub enum CacheError {
     #[error("state entry not found")]
     EntryNotFound,
     #[error("no value in state entry")]
@@ -47,119 +40,128 @@ pub enum CacheEntryError {
     TypeMismatch,
 }
 
-// T.tt.... | Slpd.... | E....... | V.tyvvvv | V.tyvvvv
+///
+struct StateEntry {
+    parent: Option<CacheEntryKey>,
+    dirty: bool,
+    value: Option<Box<dyn Any>>,
+}
 
-// Simple tagged cached value:
-// 32 B for the tag
-// 32 B for start group
-// 32 B for the value
-// 32 B for end group
-// == 128 B for a single cache entry
+impl StateEntry {
+    pub fn value_mut<T: 'static>(&mut self) -> Result<&mut T, CacheError> {
+        self.value
+            .as_mut()
+            .ok_or(CacheError::VacantEntry)?
+            .downcast_mut::<T>()
+            .ok_or(CacheError::TypeMismatch)
+    }
+}
 
-// 32b slots
-// If possible, store cached values inline: need typeid (8b) + pointer or value (16b) => total 32b per entry
-// For, say, 3500 UI elements, that's 448 kB of pointers
-
-// the most common case will be memoized entries:
-// => a call key, a certain number of values (let's say 2 on average), and the cached value.
-// => values should be stored inline if small, to avoid indirections
-// (meh: simply using a struct instead of individual params can result in poorer perfs...)
-// => bag all params in a struct, stuff it in the cache, now we have only one value
-// if bigger than, say, 16b, it incurs a
-
-// How about an arena allocator?
-//
-
+/// A slot in the slot table.
+///
 enum Slot {
     /// Marks the start of a group.
     /// Contains the length of the group including this slot and the `GroupEnd` marker.
     StartGroup {
-        // 4 + 4 + 8 + 8
-        key: CallKey,
-        group_key: GroupKey,
+        call_id: CallId,
+        key: CacheEntryKey,
         len: u32,
     },
     /// Marks the end of a scope.
     EndGroup,
-    /// Holds a cached value.
-    Value { key: CallKey, value: Box<dyn Any> },
-    /// Placeholder for a not-yet-written value
-    Placeholder { key: CallKey },
+    Value {
+        call_id: CallId,
+        key: CacheEntryKey,
+    },
 }
 
-impl Slot {
-    fn update_group_len(&mut self, new_len: usize) {
-        let new_len: u32 = new_len.try_into().unwrap();
-        match self {
-            Slot::StartGroup { len, .. } => {
-                *len = new_len;
-            }
-            _ => {
-                panic!("expected group start")
-            }
+/// A key used to access a state variable stored in a `Cache`.
+pub struct Key<T> {
+    key: CacheEntryKey,
+    _phantom: PhantomData<*const T>,
+}
+
+impl<T> Copy for Key<T> {}
+
+impl<T> Clone for Key<T> {
+    fn clone(&self) -> Self {
+        Key {
+            key: self.key,
+            _phantom: Default::default(),
         }
     }
 }
 
-pub struct CacheInner {
+impl<T> fmt::Debug for Key<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.key, f)
+    }
+}
+
+impl<T> Key<T> {
+    ///
+    fn from_entry_key(key: CacheEntryKey) -> Key<T> {
+        Key {
+            key,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+/// Cache internals. They are split from `Cache` itself so that they can be temporarily moved out.
+struct CacheInner {
+    /// The call tree, represented as an array of slots.
     slots: Vec<Slot>,
-    group_map: SlotMap<GroupKey, Group>,
+    ///
+    entries: SlotMap<CacheEntryKey, StateEntry>,
     revision: usize,
 }
 
 impl CacheInner {
     pub fn new() -> CacheInner {
-        let mut group_map = SlotMap::with_key();
-        let root_group_key = group_map.insert(Group {
+        let mut entries = SlotMap::with_key();
+        let root_group_key = entries.insert(StateEntry {
             parent: None,
             dirty: false,
+            value: None,
         });
         CacheInner {
             slots: vec![
                 Slot::StartGroup {
-                    key: CallKey(0),
-                    group_key: root_group_key,
+                    call_id: CallId(0),
+                    key: root_group_key,
                     len: 2,
                 },
                 Slot::EndGroup,
             ],
 
             revision: 0,
-            group_map,
+            entries,
         }
     }
 
-    /// Invalidates a cache entry and all dependents.
-    pub fn invalidate(&mut self, token: CacheInvalidationToken) {
-        self.invalidate_group(token.key);
+    /// Sets the value of a state entry and invalidates all dependent entries.
+    pub fn set_state<T: 'static>(&mut self, key: Key<T>, new_value: T) -> Result<(), CacheError> {
+        let mut value = self.entries[key.key]
+            .value
+            .as_mut()
+            .ok_or(CacheError::EntryNotFound)?
+            .downcast_mut::<T>()
+            .ok_or(CacheError::TypeMismatch)?;
+        *value = new_value;
+        self.invalidate_entry_recursive(key.key);
+        Ok(())
     }
 
-    /*pub fn value_mut<T: 'static>(&mut self, key: ValueEntryKey) -> &mut T {
-        let slot_index = *self
-            .mutable_values
-            .get(key)
-            .expect("invalid mutable value key");
-        match &mut self.slots[slot_index] {
-            Slot::Value(entry) => entry
-                .downcast_mut()
-                .expect("type mismatch")
-                .get_mut()
-                .expect("entry was vacant"),
-            _ => {
-                panic!("unexpected entry type")
-            }
-        }
-    }*/
-
-    fn invalidate_group(&mut self, group_key: GroupKey) {
-        if !self.group_map.contains_key(group_key) {
+    fn invalidate_entry_recursive(&mut self, key: CacheEntryKey) {
+        if !self.entries.contains_key(key) {
             tracing::warn!("invalidate_group: no such group");
             return;
         }
-        let group = &mut self.group_map[group_key];
+        let group = &mut self.entries[key];
         group.dirty = true;
         if let Some(parent) = group.parent {
-            self.invalidate_group(parent);
+            self.invalidate_entry_recursive(parent);
         }
     }
 
@@ -171,72 +173,60 @@ impl CacheInner {
                 eprint!("  ");
             }
             match s {
-                Slot::StartGroup {
-                    key,
-                    len,
-                    group_key,
-                } => {
-                    let group = &self.group_map[*group_key];
+                Slot::StartGroup { call_id, len, key } => {
+                    let entry = &self.entries[*key];
                     eprintln!(
-                        "{:3} StartGroup key={:?} len={} (end={}) group_key={:?} group_parent={:?} dirty={}",
+                        "{:3} StartGroup call_id={:?} len={} (end={}) key={:?} parent={:?} dirty={}",
                         i,
-                        key,
+                        call_id,
                         *len,
                         i + *len as usize - 1,
-                        group_key,
-                        group.parent,
-                        group.dirty,
+                        key,
+                        entry.parent,
+                        entry.dirty,
                     )
                 }
                 Slot::EndGroup => {
                     eprintln!("{:3} EndGroup", i)
                 }
-                Slot::Value { key, value } => {
-                    eprintln!("{:3} Value      key={:?} {:?}", i, key, value.type_id())
-                }
-                Slot::Placeholder { key } => {
-                    eprintln!("{:3} Placeholder key={:?}", i, key);
+                Slot::Value { call_id, key } => {
+                    eprintln!("{:3} Value      call_id={:?} key={:?}", i, call_id, key)
                 }
             }
         }
     }
 }
 
-/// Used to update a cache in a composition context.
-pub struct CacheWriter {
+/// Holds the state during cache updates (`Cache::run`).
+struct CacheWriter {
     /// The cache being updated
     cache: CacheInner,
-    /// Current writing position
+    /// Current position in the slot table (`self.cache.slots`)
     pos: usize,
-    /// return index
+    /// Stack of group start positions.
+    /// The top element is the start of the current group.
     group_stack: Vec<usize>,
 }
 
 impl CacheWriter {
-    pub fn new(cache: CacheInner) -> CacheWriter {
+    fn new(cache: CacheInner) -> CacheWriter {
         let mut writer = CacheWriter {
             cache,
             pos: 0,
             group_stack: vec![],
         };
-        writer.start_group(CallKey(0));
+        writer.start_group(CallId(0));
         writer
     }
 
-    fn parent_group_key(&self) -> Option<GroupKey> {
+    fn parent_entry_key(&self) -> Option<CacheEntryKey> {
         if let Some(&group_start) = self.group_stack.last() {
             match self.cache.slots[group_start] {
-                Slot::StartGroup { group_key, .. } => Some(group_key),
+                Slot::StartGroup { key: group_key, .. } => Some(group_key),
                 _ => panic!("unexpected entry type"),
             }
         } else {
             None
-        }
-    }
-
-    pub fn get_invalidation_token(&self) -> CacheInvalidationToken {
-        CacheInvalidationToken {
-            key: self.parent_group_key().unwrap(),
         }
     }
 
@@ -253,19 +243,26 @@ impl CacheWriter {
     /// # Return value
     ///
     /// The position of the matching slot in the table, or None.
-    fn find_tag_in_current_group(&self, call_key: CallKey) -> Option<usize> {
+    fn find_call_id(&self, call_id: CallId) -> Option<usize> {
         let mut i = self.pos;
         let slots = &self.cache.slots[..];
 
         while i < self.cache.slots.len() {
             match slots[i] {
-                Slot::StartGroup { key, len, .. } => {
-                    if key == call_key {
+                Slot::StartGroup {
+                    call_id: this_call_id,
+                    len,
+                    ..
+                } => {
+                    if this_call_id == call_id {
                         return Some(i);
                     }
                     i += len as usize;
                 }
-                Slot::Value { key, .. } if key == call_key => {
+                Slot::Value {
+                    call_id: this_call_id,
+                    ..
+                } if this_call_id == call_id => {
                     return Some(i);
                 }
                 Slot::EndGroup => {
@@ -289,8 +286,9 @@ impl CacheWriter {
         self.cache.slots[self.pos..group_end_pos].rotate_left(pos - self.pos);
     }
 
-    fn sync(&mut self, call_key: CallKey) -> bool {
-        let pos = self.find_tag_in_current_group(call_key);
+    /// TODO docs
+    fn sync(&mut self, call_id: CallId) -> bool {
+        let pos = self.find_call_id(call_id);
         match pos {
             Some(pos) => {
                 // move slots in position
@@ -301,13 +299,13 @@ impl CacheWriter {
         }
     }
 
-    fn parent_group_offset(&self) -> i32 {
+    /*fn parent_group_offset(&self) -> i32 {
         if let Some(&parent) = self.group_stack.last() {
             parent as i32 - self.pos as i32
         } else {
             0
         }
-    }
+    }*/
 
     /*fn update_parent_group_offset(&mut self) {
         let parent = self.parent_group_offset();
@@ -323,31 +321,28 @@ impl CacheWriter {
         }
     }*/
 
-    pub fn start_group(&mut self, call_key: CallKey) -> bool {
-        let key_found = self.sync(call_key);
-
-        //let parent = self.parent_group_offset();
-        let parent = self.parent_group_key();
-
-        let dirty = if key_found {
+    pub fn start_group(&mut self, call_id: CallId) -> bool {
+        let parent = self.parent_entry_key();
+        let dirty = if self.sync(call_id) {
             match self.cache.slots[self.pos] {
-                Slot::StartGroup { group_key, .. } => self.cache.group_map[group_key].dirty,
+                Slot::StartGroup { key, .. } => self.cache.entries[key].dirty,
                 _ => panic!("unexpected slot type"),
             }
         } else {
             // insert new group - start and end markers
-            let group_key = self.cache.group_map.insert(Group {
+            let key = self.cache.entries.insert(StateEntry {
                 parent,
                 dirty: false,
+                value: None,
             });
             self.cache.slots.insert(
                 self.pos,
                 Slot::StartGroup {
-                    key: call_key,
-                    group_key,
-                    len: 2,
+                    call_id,
+                    key,
+                    len: 2, // 2 = initial length of group (start+end slots)
                 },
-            ); // 2 = initial length of group (start+end slots)
+            );
             self.cache.slots.insert(self.pos + 1, Slot::EndGroup);
             false
         };
@@ -358,7 +353,7 @@ impl CacheWriter {
         dirty
     }
 
-    pub fn dump(&self) {
+    fn dump(&self) {
         eprintln!("position : {}", self.pos);
         eprintln!("stack    : {:?}", self.group_stack);
         eprintln!("slots:");
@@ -386,11 +381,11 @@ impl CacheWriter {
         // - find position of group end marker
         let group_end_pos = self.group_end_position();
 
-        // remove the extra nodes, and remove groups from the group map
+        // remove the extra slots, and associated entries
         for slot in self.cache.slots.drain(self.pos..group_end_pos) {
             match slot {
-                Slot::StartGroup { group_key, .. } => {
-                    self.cache.group_map.remove(group_key);
+                Slot::StartGroup { key, .. } => {
+                    self.cache.entries.remove(key);
                 }
                 _ => {}
             }
@@ -402,11 +397,9 @@ impl CacheWriter {
         let group_start_pos = self.group_stack.pop().expect("unbalanced groups");
         match self.cache.slots[group_start_pos] {
             Slot::StartGroup {
-                ref mut len,
-                group_key,
-                ..
+                ref mut len, key, ..
             } => {
-                self.cache.group_map[group_key].dirty = false;
+                self.cache.entries[key].dirty = false;
                 *len = (self.pos - group_start_pos).try_into().unwrap();
             }
             _ => {
@@ -421,7 +414,7 @@ impl CacheWriter {
             Slot::StartGroup { len, .. } => {
                 self.pos += len as usize;
             }
-            Slot::Value { .. } | Slot::Placeholder { .. } => {
+            Slot::Value { .. } => {
                 self.pos += 1;
             }
             Slot::EndGroup => {
@@ -436,260 +429,88 @@ impl CacheWriter {
         }
     }
 
-    fn expect_value<T: Clone + 'static>(&mut self, call_key: CallKey) -> (Option<T>, usize) {
-        let slot = self.pos;
-        let value = match self.cache.slots[slot] {
-            Slot::Value { key, ref mut value } if key == call_key => {
-                Some(value.downcast_mut::<T>().expect("unexpected type").clone())
-            }
-            _ => {
-                // otherwise, insert a new entry
-                self.cache
-                    .slots
-                    .insert(slot, Slot::Placeholder { key: call_key });
+    /// Inserts a new state entry.
+    fn insert_value<T: 'static>(&mut self, call_id: CallId, value: Option<T>) -> Key<T> {
+        let parent = self.parent_entry_key();
+        let key = self.cache.entries.insert(StateEntry {
+            parent,
+            dirty: false,
+            value: if let Some(value) = value {
+                Some(Box::new(value))
+            } else {
                 None
-            }
-        };
-        self.pos += 1;
-        (value, slot)
+            },
+        });
+        self.cache
+            .slots
+            .insert(self.pos, Slot::Value { call_id, key });
+        Key::from_entry_key(key)
     }
 
-    /*/// Reserves a value slot at the current position in the cache.
-    /// If there's a value at the current position, overwrites the value, otherwise inserts a placeholder.
-    /// Use `set_value` with the returned index to set the value of the slot afterwards.
-    fn make_placeholder(&mut self) -> usize {
-        let pos = self.pos;
-        match self.cache.slots[pos] {
-            // if next slot is value or placeholder, overwrite
-            Slot::Value(_) => {}
-            Slot::Placeholder => {}
-            _ => {
-                // otherwise, insert a new entry
-                self.cache.slots.insert(pos, Slot::Placeholder);
-            }
-        }
-        pos
-    }*/
-
-    fn set_value<T: 'static>(&mut self, slot: usize, value: T) {
-        let key = match self.cache.slots[slot] {
-            Slot::Value { key, .. } => key,
-            Slot::Placeholder { key } => key,
-            _ => {
-                panic!("must call set_value on a placeholder or value slot")
-            }
-        };
-        self.cache.slots[slot] = Slot::Value {
-            key,
-            value: Box::new(value),
-        };
-    }
-
-    /*pub fn tagged_compare_and_update_value<T: Data>(
-        &mut self,
-        call_key: CallKey,
-        new_value: T,
-    ) -> bool {
-        if self.sync(call_key) {
-            self.compare_and_update_value(new_value)
+    fn set_value<T: 'static>(&mut self, cache_key: Key<T>, new_value: T) {
+        let value = &mut self.cache.entries[cache_key.key].value;
+        if let Some(v) = value {
+            *v.downcast_mut::<T>().expect("type mismatch") = new_value;
         } else {
-            self.insert_value(new_value);
-            true
+            *value = Some(Box::new(new_value));
         }
-    }*/
+    }
 
-    pub fn compare_and_update_value<T: Data>(&mut self, call_key: CallKey, new_value: T) -> bool {
-        let changed = if self.sync(call_key) {
+    /// If the next entry is a value of type T, returns a clone of the value, otherwise inserts a vacant entry.
+    fn expect_value<T: Clone + 'static>(&mut self, call_key: CallId) -> (Option<T>, Key<T>) {
+        let result = if self.sync(call_key) {
             match self.cache.slots[self.pos] {
-                Slot::Value { key, ref mut value } => {
-                    assert_eq!(key, call_key);
-                    let value = value.downcast_mut::<T>().expect("entry type mismatch");
-                    if !new_value.same(&value) {
-                        *value = new_value;
-                        true
-                    } else {
-                        false
-                    }
+                Slot::Value { key: entry_key, .. } => {
+                    let value = self.cache.entries[entry_key]
+                        .value_mut::<T>()
+                        .unwrap()
+                        .clone();
+                    (Some(value), Key::from_entry_key(entry_key))
                 }
-                _ => {
-                    // not expecting anything else
-                    panic!("unexpected slot type");
-                }
+                _ => panic!("unexpected entry type"),
             }
         } else {
-            // insert entry
-            self.cache.slots.insert(
-                self.pos,
-                Slot::Value {
-                    key: call_key,
-                    value: Box::new(new_value),
-                },
-            );
-            true
+            let k = self.insert_value(call_key, None);
+            (None, k)
         };
-
         self.pos += 1;
-        changed
+        result
     }
 
-    /*pub fn tagged_take_value<T: 'static>(
+    /// If the next entry is a value of type T, returns a clone of the value, otherwise inserts a
+    /// new value entry with `init` and returns a clone of this value.
+    fn state<T: Clone + 'static>(
         &mut self,
-        call_key: CallKey,
-        mutable: bool,
+        call_key: CallId,
         init: impl FnOnce() -> T,
-    ) -> (usize, T) {
-        if self.sync(call_key) {
-            self.take_value(mutable, init)
-        } else {
-            let (index, entry) = self.insert_value(mutable, init());
-            (index, entry.take_value().unwrap())
-        }
-    }
-
-    pub fn take_value<T: 'static>(
-        &mut self,
-        mutable: bool,
-        init: impl FnOnce() -> T,
-    ) -> (usize, T) {
-        let parent = self.parent_group_offset();
-        match &mut self.cache.slots[self.pos] {
-            Slot::Value(entry) => {
-                entry.parent = parent;
-                let pos = self.pos;
-                let value = entry
-                    .downcast_mut::<T>()
-                    .expect("entry type mismatch")
-                    .take_value()
-                    .unwrap_or_else(init);
-                self.pos += 1;
-                (pos, value)
-            }
-            Slot::EndGroup => {
-                let (pos, entry) = self.insert_value(mutable, init());
-                (pos, entry.take_value().unwrap())
-            }
-            _ => {
-                // not expecting anything else
-                panic!("unexpected slot type");
-            }
-        }
-    }
-
-    pub fn replace_value<T: 'static>(&mut self, slot_index: usize, value: T) -> Option<T> {
-        assert!(slot_index < self.pos);
-        match &mut self.cache.slots[slot_index] {
-            Slot::Value(entry) => entry
-                .downcast_mut::<T>()
-                .expect("entry type mismatch")
-                .replace_value(Some(value)),
-            _ => {
-                panic!("unexpected slot type");
-            }
-        }
-    }*/
-
-    /*pub(crate) fn cache_result<T: Any + Clone>(
-        &self,
-        key: CallKey,
-        input_hash: u64,
-        f: impl FnOnce() -> T,
-        location: Option<&'static Location<'static>>,
-    ) -> T {
-        // if an entry already exists and its input hash matches, return it.
-        if let Some(entry) = self.entries.borrow().get(&key) {
-            match entry.kind {
-                CacheEntryKind::FunctionResult {
-                    input_hash: entry_input_hash,
-                } => {
-                    if entry_input_hash == input_hash {
-                        return entry
-                            .value
-                            .downcast_ref::<T>()
-                            .expect("cache entry type mismatch")
-                            .clone();
-                    }
-                }
-                CacheEntryKind::State => {
-                    panic!("unexpected cache entry type")
-                }
-            }
-            assert!(
-                entry.input_hash.is_some(),
-                "existing cache entry differs in mutability"
-            );
-            if entry.input_hash == Some(input_hash) && !entry.is_dirty() {}
-        }
-
-        let parent = self.dependency_chain.borrow().first().cloned();
-        self.dependency_chain.borrow_mut().push(key);
-        let value = f();
-        self.dependency_chain.borrow_mut().pop();
-
-        match self.entries.borrow_mut().entry(key) {
-            Entry::Occupied(mut entry) => {
-                // update the existing cache entry with the new value and hash, and reset its dirty
-                // flag. Also make sure that the type is correct.
-                entry.get_mut().update_function_result(input_hash, value);
-                let entry = entry.get_mut();
-                entry.replace_value(Some(value));
-                entry.input_hash = Some(input_hash);
-                entry.dirty.set(false);
-                assert_eq!(entry.parent, parent);
-            }
-            Entry::Vacant(entry) => {
-                // insert a fresh entry
-                entry.insert(CacheEntry::new_function_result(
-                    parent, input_hash, value, location,
-                ));
+    ) -> (T, Key<T>) {
+        let (v, k) = self.expect_value(call_key);
+        let v = match v {
+            Some(v) => v,
+            None => {
+                let v = init();
+                self.set_value(k, v.clone());
+                v
             }
         };
-
-        value
+        (v, k)
     }
 
-    pub(crate) fn cache<T, Args>(
-        &self,
-        key: CallKey,
-        args: Args,
-        f: impl FnOnce(&Args) -> T,
-        location: Option<&'static Location<'static>>,
-    ) -> T
-    where
-        T: Any + Clone,
-        Args: Hash,
-    {
-        let args_hash = {
-            let mut s = DefaultHasher::new();
-            args.hash(&mut s);
-            s.finish()
-        };
-
-        self.cache_impl(key, Some(args_hash), move || f(&args), location)
-    }
-
-    pub(crate) fn cache_state<T: Any + Clone>(
-        &self,
-        key: CallKey,
-        init: impl FnOnce() -> T,
-        location: Option<&'static Location<'static>>,
-    ) -> T {
-        self.cache_impl(key, None, init, location)
-    }*/
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct CacheInvalidationToken {
-    key: GroupKey,
-}
-
-impl CacheInvalidationToken {
-    pub(crate) fn to_u64(&self) -> u64 {
-        self.key.0.as_ffi()
+    ///
+    fn compare_and_update_value<T: Data>(&mut self, call_key: CallId, new_value: T) -> bool {
+        let (v, k) = self.expect_value::<T>(call_key);
+        match v {
+            Some(v) if v.same(&new_value) => false,
+            _ => {
+                self.set_value(k, new_value);
+                true
+            }
+        }
     }
 }
 
 struct CacheContext {
-    key_stack: CallKeyStack,
+    key_stack: CallIdStack,
     writer: CacheWriter,
 }
 
@@ -701,6 +522,7 @@ thread_local! {
     static CURRENT_CACHE_CONTEXT: RefCell<Option<CacheContext>> = RefCell::new(None);
 }
 
+/// Positional cache.
 pub struct Cache {
     inner: Option<CacheInner>,
 }
@@ -727,7 +549,7 @@ impl Cache {
             // initialize the TLS cache context (which contains the cache table writer and the call key stack that maintains
             // unique IDs for each cached function call).
             let cx = CacheContext {
-                key_stack: CallKeyStack::new(),
+                key_stack: CallIdStack::new(),
                 writer,
             };
             cx_cell.borrow_mut().replace(cx);
@@ -747,8 +569,9 @@ impl Cache {
         })
     }
 
-    pub fn invalidate(&mut self, token: CacheInvalidationToken) {
-        self.inner.as_mut().unwrap().invalidate(token);
+    /// Sets the value of the state variable identified by `key`, and invalidates all dependent variables in the cache.
+    pub fn set_state<T: 'static>(&mut self, key: Key<T>, value: T) -> Result<(), CacheError> {
+        self.inner.as_mut().unwrap().set_state(key, value)
     }
 
     fn with_cx<R>(f: impl FnOnce(&mut CacheContext) -> R) -> R {
@@ -762,7 +585,7 @@ impl Cache {
     }
 
     /// Returns the current call identifier.
-    pub fn current_call_key() -> CallKey {
+    pub fn current_call_id() -> CallId {
         Self::with_cx(|cx| cx.key_stack.current())
     }
 
@@ -778,6 +601,7 @@ impl Cache {
         Self::with_cx(move |cx| cx.key_stack.exit());
     }
 
+    /// Enters a
     /// Must be called inside `Cache::run`.
     #[track_caller]
     pub fn scoped<R>(index: usize, f: impl FnOnce() -> R) -> R {
@@ -785,11 +609,6 @@ impl Cache {
         let r = f();
         Self::exit();
         r
-    }
-
-    /// Returns an invalidation token for the value being calculated.
-    pub fn get_invalidation_token() -> CacheInvalidationToken {
-        Self::with_cx(move |cx| cx.writer.get_invalidation_token())
     }
 
     #[track_caller]
@@ -805,19 +624,32 @@ impl Cache {
     }
 
     #[track_caller]
-    pub fn expect_value<T: Clone + 'static>() -> (Option<T>, usize) {
+    pub fn expect_value<T: Clone + 'static>() -> (Option<T>, Key<T>) {
         let location = Location::caller();
         Self::with_cx(|cx| {
             cx.key_stack.enter(location, 0);
             let key = cx.key_stack.current();
-            let r = cx.writer.expect_value::<T>(key);
+            let (value, entry_key) = cx.writer.expect_value::<T>(key);
             cx.key_stack.exit();
-            r
+            (value, entry_key)
         })
     }
 
-    pub fn set_value<T: Clone + 'static>(slot: usize, value: T) {
-        Self::with_cx(move |cx| cx.writer.set_value(slot, value))
+    ///
+    #[track_caller]
+    pub fn state<T: Clone + 'static>(init: impl FnOnce() -> T) -> (T, Key<T>) {
+        let location = Location::caller();
+        Self::with_cx(move |cx| {
+            cx.key_stack.enter(location, 0);
+            let key = cx.key_stack.current();
+            let (value, cache_key) = cx.writer.state(key, init);
+            cx.key_stack.exit();
+            (value, cache_key)
+        })
+    }
+
+    pub fn set_value<T: Clone + 'static>(key: Key<T>, value: T) {
+        Self::with_cx(move |cx| cx.writer.set_value(key, value))
     }
 
     #[track_caller]
@@ -845,13 +677,13 @@ impl Cache {
     pub fn memoize<Args: Data, T: Clone + 'static>(args: Args, f: impl FnOnce() -> T) -> T {
         Self::group(move |dirty| {
             let changed = dirty | Self::changed(args);
-            let (value, slot) = Self::expect_value::<T>();
+            let (value, entry_key) = Self::expect_value::<T>();
             if !changed {
                 Self::skip_to_end_of_group();
                 value.expect("memoize: no changes in arguments but no value calculated")
             } else {
                 let value = f();
-                Self::set_value(slot, value.clone());
+                Self::set_value(entry_key, value.clone());
                 value
             }
         })
@@ -894,9 +726,9 @@ mod tests {
 
         for _ in 0..3 {
             let mut writer = CacheWriter::new(cache);
-            writer.start_group(CallKey(99));
-            writer.compare_and_update_value(CallKey(1), 0);
-            writer.compare_and_update_value(CallKey(2), "hello world".to_string());
+            writer.start_group(CallId(99));
+            writer.compare_and_update_value(CallId(1), 0);
+            writer.compare_and_update_value(CallId(2), "hello world".to_string());
             writer.end_group();
             cache = writer.finish();
             cache.dump(0);
@@ -918,8 +750,8 @@ mod tests {
                     " ==== Iteration {} - item {} =========================",
                     i, item
                 );
-                writer.start_group(CallKey(item));
-                writer.compare_and_update_value(CallKey(100), i);
+                writer.start_group(CallId(item));
+                writer.compare_and_update_value(CallId(100), i);
                 writer.end_group();
                 writer.dump();
             }
@@ -935,15 +767,15 @@ mod tests {
 
         for _ in 0..3 {
             let mut writer = CacheWriter::new(cache);
-            writer.start_group(CallKey(99));
-            let changed = writer.compare_and_update_value(CallKey(100), 0);
-            let (value, slot) = writer.expect_value::<f64>(CallKey(101));
+            writer.start_group(CallId(99));
+            let changed = writer.compare_and_update_value(CallId(100), 0);
+            let (value, slot) = writer.expect_value::<f64>(CallId(101));
 
             if !changed {
                 assert!(value.is_some());
                 writer.skip_until_end_of_group();
             } else {
-                writer.compare_and_update_value(CallKey(102), "hello world".to_string());
+                writer.compare_and_update_value(CallId(102), "hello world".to_string());
                 writer.set_value(slot, 0.0);
             }
 
@@ -968,7 +800,7 @@ mod tests {
                     " ==== Iteration {} - item {} =========================",
                     i, item
                 );
-                writer.compare_and_update_value(CallKey(100 + item), i);
+                writer.compare_and_update_value(CallId(100 + item), i);
             }
             //writer.dump();
             cache = writer.finish();
@@ -1034,7 +866,7 @@ mod tests {
             let mut writer = CacheWriter::new(cache);
             for &item in items.iter() {
                 //eprintln!(" ==== Iteration {} - item {} =========================", i, item);
-                writer.compare_and_update_value(CallKey(item), Item::new(item));
+                writer.compare_and_update_value(CallId(item), Item::new(item));
                 //writer.dump();
             }
             //writer.dump();

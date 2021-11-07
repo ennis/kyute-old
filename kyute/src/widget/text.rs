@@ -1,28 +1,27 @@
 //! Text elements
-use crate::{env::Environment, event::Event, BoxConstraints, EventCtx, LayoutCtx, Measurements, PaintCtx, Point, Rect, Widget, LayoutItem};
+use crate::{
+    composable, env::Environment, event::Event, BoxConstraints, EventCtx, LayoutCtx, LayoutItem,
+    Measurements, PaintCtx, Point, Rect, Widget, WidgetPod,
+};
 use kyute_shell::{
     drawing::{Brush, Color, DrawTextOptions},
     text::{TextFormatBuilder, TextLayout},
 };
+use std::cell::RefCell;
 
 #[derive(Clone)]
 pub struct Text {
     text: String,
-    text_layout: Option<TextLayout>,
+    text_layout: RefCell<Option<TextLayout>>,
 }
 
 impl Text {
-    pub fn new(text: impl Into<String>) -> Text {
-        Text {
-            text: text.into(),
-            text_layout: None,
-        }
-    }
-
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        // don't check if the text hasn't changed: this is done during composition
-        self.text = text.into();
-        self.text_layout = None;
+    #[composable]
+    pub fn new(text: String) -> WidgetPod<Text> {
+        WidgetPod::new(Text {
+            text,
+            text_layout: RefCell::new(None),
+        })
     }
 }
 
@@ -31,12 +30,14 @@ impl Widget for Text {
         std::any::type_name::<Self>()
     }
 
+    fn event(&self, _ctx: &mut EventCtx, _event: &Event) {}
+
     fn layout(
         &self,
         _ctx: &mut LayoutCtx,
         constraints: BoxConstraints,
         _env: &Environment,
-    ) -> LayoutItem {
+    ) -> Measurements {
         let font_name = "Consolas";
         let font_size = 12;
         let text_format = TextFormatBuilder::new()
@@ -45,7 +46,6 @@ impl Widget for Text {
             .build()
             .unwrap();
 
-        // TODO check for changes instead of re-creating from scratch every time
         let text_layout = TextLayout::new(&self.text, &text_format, constraints.biggest()).unwrap();
 
         // round size to nearest device pixel
@@ -55,14 +55,15 @@ impl Widget for Text {
             .first()
             .map(|m| m.baseline as f64);
 
-        //self.text_layout = Some(text_layout);
-        LayoutItem::new(Measurements { size, baseline })
+        self.text_layout.replace(Some(text_layout));
+        Measurements { size, baseline }
     }
 
     fn paint(&self, ctx: &mut PaintCtx, _bounds: Rect, _env: &Environment) {
         let text_brush = Brush::solid_color(ctx, Color::new(0.92, 0.92, 0.92, 1.0));
 
-        if let Some(ref text_layout) = self.text_layout {
+        let text_layout = self.text_layout.borrow();
+        if let Some(ref text_layout) = &*text_layout {
             ctx.draw_text_layout(
                 Point::origin(),
                 text_layout,

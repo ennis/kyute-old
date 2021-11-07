@@ -3,7 +3,10 @@
 //! Provides the `run_application` function that opens the main window and translates the incoming
 //! events from winit into the events expected by a kyute [`NodeTree`](crate::node::NodeTree).
 
-use crate::{BoxConstraints, Point, WidgetPod, LayoutItem, Cache, CacheInvalidationToken};
+use crate::{
+    cache::Key, core2::WidgetId, BoxConstraints, Cache, Event, InternalEvent, LayoutItem, Point,
+    WidgetPod,
+};
 use keyboard_types::KeyState;
 use kyute_shell::{
     platform::Platform,
@@ -23,118 +26,123 @@ use std::{
 };
 use tracing::{trace_span, warn};
 
-/*struct PendingEvent {
-    source: Option<NodeId>,
-    target: EventTarget,
-    event: Event,
-}
-
-struct PendingAction {
-    node: NodeId,
-    payload: Box<dyn Any>,
-}*/
-
 /// Global application context. Contains stuff passed to all widget contexts (Event,Layout,Paint...)
 pub struct AppCtx {
     /// Open windows, mapped to their corresponding widget.
-    pub(crate) windows: HashMap<WindowId, WidgetPod>,
-    cache: Cache,
-    /*/// Events waiting to be delivered
-    pending_events: Vec<PendingEvent>,
-    /// Actions emitted by widgets waiting to be processed.
-    pending_actions: Vec<PendingAction>,
-    needs_relayout: bool,
-    needs_recomposition: bool,
-    needs_full_repaint: bool,*/
+    pub(crate) windows: HashMap<WindowId, WidgetId>,
+    /// Main UI cache.
+    ///
+    /// Stores cached copies of widgets and state variables.
+    pub(crate) cache: Cache,
+    pub(crate) redraw_requested: bool,
+    pub(crate) pending_events: Vec<Event>,
 }
 
 impl AppCtx {
+    /// Creates a new AppCtx.
     fn new() -> AppCtx {
         AppCtx {
             windows: HashMap::new(),
-            cache: Cache::new()
-            //pending_events: vec![],
-            //pending_actions: vec![],
-            //needs_relayout: false,
-            //needs_recomposition: false,
-            //needs_full_repaint: false,
+            cache: Cache::new(),
+            redraw_requested: false,
+            pending_events: vec![],
         }
     }
 
     /// Registers a widget as a native window widget.
+    ///
     /// The event loop will call `window_event` whenever an event targeting the window is received.
-    pub(crate) fn register_window_widget(&mut self, window_id: WindowId, widget: WidgetPod) {
+    pub(crate) fn register_window_widget(&mut self, window_id: WindowId, widget_id: WidgetId) {
         match self.windows.entry(window_id) {
             Entry::Occupied(_) => {
                 warn!("window id {:?} already registered", window_id);
             }
             Entry::Vacant(entry) => {
-                entry.insert(widget);
+                entry.insert(widget_id);
             }
         }
     }
 
-    pub(crate) fn find_window_widget(&self, window_id: WindowId) -> Option<WidgetPod> {
-        self.windows.get(&window_id).cloned()
+    /// Sets the value of the state variable identified by `key` in the main UI cache.
+    pub(crate) fn set_state<T: 'static>(&mut self, key: Key<T>, value: T) {
+        self.cache.set_state(key, value);
     }
 
-    pub(crate) fn invalidate_cache(&mut self, token: CacheInvalidationToken) {
-        self.cache.invalidate(token)
+    pub fn post_event(&mut self, event: Event) {
+        self.pending_events.push(event);
     }
 
-    /*pub(crate) fn post_action(&mut self, node: NodeId, payload: Box<dyn Any>) {
-        self.pending_actions.push(PendingAction { node, payload })
+    fn send_event(
+        &mut self,
+        root_widget: &mut WidgetPod,
+        event_loop: &EventLoopWindowTarget<()>,
+        event: Event
+    ) {
+        self.post_event(event);
+        self.flush_pending_events(root_widget, event_loop);
     }
 
-    pub fn post_event(&mut self, source: Option<NodeId>, target: EventTarget, event: Event) {
-        self.pending_events.push(PendingEvent {
-            source,
-            target,
-            event,
-        })
-    }*/
-
-    /*pub(crate) fn request_recomposition(&mut self) {
-        self.needs_recomposition = true;
+    fn flush_pending_events(
+        &mut self,
+        root_widget: &mut WidgetPod,
+        event_loop: &EventLoopWindowTarget<()>,
+    ) {
+        while !self.pending_events.is_empty() {
+            let events = mem::take(&mut self.pending_events);
+            for event in events {
+                root_widget.send_root_event(self, event_loop, &event)
+            }
+        }
     }
-
-    pub(crate) fn request_relayout(&mut self) {
-        self.needs_relayout = true;
-    }*/
 }
 
-
-fn get_root_widget(root_widget_fn: fn() -> WidgetPod) -> WidgetPod {
-    root_widget_fn()
-}
-
-/*fn build_window_widgets_map(root: LayoutItem) -> HashMap<WindowId, LayoutItem>
-{
-    fn build_map_recursive(item: LayoutItem) {}
-    let mut map = HashMap::new();
-    Context::cache(root,
-                   |root| { });
-}*/
-
-pub fn run(root_widget_fn: fn() -> WidgetPod) {
-
-    let root_widget = root_widget_fn();
-
+pub fn run(ui: fn() -> WidgetPod) {
     let mut event_loop = EventLoop::new();
     let mut app_ctx = AppCtx::new();
+
+    // initial evaluation of the root widget in the main UI cache.
+    let mut root_widget: WidgetPod = app_ctx.cache.run(ui);
+    root_widget.ensure_initialized(&mut app_ctx, &event_loop);
 
     // run event loop
     event_loop.run(move |event, elwt, control_flow| {
         *control_flow = ControlFlow::Wait;
-
         match event {
             winit::event::Event::WindowEvent {
                 window_id,
                 event: winit_event,
-            } => {}
-            winit::event::Event::RedrawRequested(window_id) => {}
+            } => {
+                if let Some(&target) = app_ctx.windows.get(&window_id) {
+                    if let Some(event) = winit_event.to_static() {
+                        app_ctx.send_event(
+                            &mut root_widget,
+                            elwt,
+                            Event::Internal(InternalEvent::RouteWindowEvent { target, event }),
+                        );
+                    }
+                } else {
+                    tracing::warn!("unregistered window id: {:?}", window_id);
+                }
+            }
+            winit::event::Event::RedrawRequested(window_id) => {
+                if let Some(&target) = app_ctx.windows.get(&window_id)  {
+                    root_widget.send_root_event(
+                        &mut app_ctx,
+                        elwt,
+                        &Event::Internal(InternalEvent::RouteRedrawRequest(target)),
+                    )
+                } else {
+                    tracing::warn!("unregistered window id: {:?}", window_id);
+                }
+            }
             winit::event::Event::MainEventsCleared => {}
             _ => (),
         }
+
+        // Re-evaluate the root widget.
+        // If no state variable in the cache has changed (because of an event), then it will simply
+        // return the same root widget.
+        root_widget = app_ctx.cache.run(ui);
+        root_widget.ensure_initialized(&mut app_ctx, elwt);
     })
 }

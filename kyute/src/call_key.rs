@@ -6,11 +6,20 @@ use std::{
     panic::Location,
 };
 
+/// Identifies a particular call site in a call tree.
+///
+/// TODO more docs
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct CallKey(pub(crate) u64);
+pub struct CallId(pub u64);
 
-impl fmt::Debug for CallKey {
+impl CallId {
+    pub fn to_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Debug for CallId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("CallKey")
             .field(&format_args!("{:016X}", self.0))
@@ -18,13 +27,13 @@ impl fmt::Debug for CallKey {
     }
 }
 
-/// The ID stack. Each level corresponds to a parent ItemNode.
-pub(crate) struct CallKeyStack(Vec<u64>);
 
-impl CallKeyStack {
-    /// Creates a new IdStack.
-    pub(crate) fn new() -> CallKeyStack {
-        CallKeyStack(vec![])
+pub(crate) struct CallIdStack(Vec<u64>);
+
+impl CallIdStack {
+    /// Creates a new empty CallIdStack.
+    pub fn new() -> CallIdStack {
+        CallIdStack(vec![])
     }
 
     fn chain_hash<H: Hash>(&self, s: &H) -> u64 {
@@ -46,22 +55,27 @@ impl CallKeyStack {
         hasher.finish()
     }
 
-    pub(crate) fn enter(&mut self, location: &Location, index: usize) -> CallKey {
-        let key = self.chain_hash(&(location, index));
-        self.0.push(key);
-        CallKey(key)
+    /// Enters a scope in the call graph.
+    pub fn enter(&mut self, location: &Location, index: usize) -> CallId {
+        let id = self.chain_hash(&(location, index));
+        self.0.push(id);
+        CallId(id)
     }
 
-    pub(crate) fn exit(&mut self) {
+    /// Exits a scope previously entered with `enter`.
+    pub fn exit(&mut self) {
         self.0.pop();
     }
 
-    pub(crate) fn current(&self) -> CallKey {
-        CallKey(*self.0.last().unwrap())
+    /// Returns the `CallId` of the current scope.
+    pub fn current(&self) -> CallId {
+        CallId(*self.0.last().unwrap())
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    /// Returns whether the stack is empty.
+    ///
+    /// The stack is empty just after creation, and when `enter` and `exit` calls are balanced.
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-
 }

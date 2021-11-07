@@ -1,5 +1,5 @@
 //! [`Events`](Event) sent to widgets, and related types.
-use crate::Point;
+use crate::{Point, WidgetId};
 use std::collections::HashMap;
 use winit::event::DeviceId;
 
@@ -120,14 +120,32 @@ pub enum MoveFocusDirection {
     After,
 }
 
-#[derive(Clone,Debug,PartialEq)]
+#[derive(Clone, Debug)]
+pub enum LifecycleEvent {}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum InternalEvent {
-    UpdateChildren,
+    RouteEvent {
+        target: WidgetId,
+        event: Box<Event>,
+    },
+    RouteHitTestEvent {
+        position: Point,
+        event: Box<Event>,
+    },
+    RouteWindowEvent {
+        target: WidgetId,
+        event: winit::event::WindowEvent<'static>,
+    },
+    RouteRedrawRequest(WidgetId),
+    RouteInitialize,
+    UpdateChildFilter,
 }
 
 /// Events.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
+    Initialize,
     FocusGained,
     FocusLost,
     Pointer(PointerEvent),
@@ -136,7 +154,9 @@ pub enum Event {
     Keyboard(KeyboardEvent),
     /// A composition event.
     Composition(CompositionEvent),
-    Internal(InternalEvent)
+    WindowEvent(winit::event::WindowEvent<'static>),
+    WindowRedrawRequest,
+    Internal(InternalEvent),
 }
 
 impl Event {
@@ -163,7 +183,7 @@ impl Event {
 }
 
 /// Last known state of a pointer.
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct PointerState {
     pub(crate) buttons: PointerButtons,
     pub(crate) position: Point,
