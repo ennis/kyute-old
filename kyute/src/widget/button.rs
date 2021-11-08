@@ -38,6 +38,10 @@ pub enum ButtonAction {
 }
 
 impl Widget for Button {
+    fn debug_name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
+
     fn event(&self, ctx: &mut EventCtx, event: &Event) {
         match event {
             Event::Pointer(p) => match p.kind {
@@ -91,11 +95,13 @@ impl Widget for Button {
     }
 
     fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
+        tracing::trace!(?bounds, "button paint");
         let brush = Brush::solid_color(ctx, Color::new(0.100, 0.100, 0.100, 1.0));
         let fill = Brush::solid_color(ctx, Color::new(0.800, 0.888, 0.100, 1.0));
         if ctx.is_hovering() {
             ctx.fill_rectangle(bounds, &fill);
         }
         ctx.draw_rectangle(bounds, &brush, 2.0);
+        self.label.paint(ctx, bounds, env);
     }
 }

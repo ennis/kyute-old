@@ -693,6 +693,7 @@ impl Cache {
     pub fn with_state<T: Data, R>(init: impl FnOnce() -> T, update: impl Fn(&mut T) -> R) -> R {
         // load the state from the cache, or reserve a slot if it's the first time we run
         let (mut value, slot) = Self::expect_value::<T>();
+        let initial = value.is_none();
 
         let mut value = if let Some(value) = value {
             // use the existing state
@@ -706,7 +707,7 @@ impl Cache {
         let r = update(&mut value);
 
         // if the state has changed, TODO
-        if !old_value.same(&value) {
+        if initial || !old_value.same(&value) {
             Self::set_value(slot, value);
             // TODO: re-run update?
         }

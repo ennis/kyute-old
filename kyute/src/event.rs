@@ -129,10 +129,10 @@ pub enum InternalEvent {
         target: WidgetId,
         event: Box<Event>,
     },
-    RouteHitTestEvent {
+    /*RouteHitTestEvent {
         position: Point,
         event: Box<Event>,
-    },
+    },*/
     RouteWindowEvent {
         target: WidgetId,
         event: winit::event::WindowEvent<'static>,

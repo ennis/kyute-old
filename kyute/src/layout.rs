@@ -206,6 +206,8 @@ pub struct Measurements {
     /// Baseline offset relative to *this* node.
     /// The baseline relative to the parent node is `offset.y + baseline`.
     pub baseline: Option<f64>,
+    /// True if the widget is a separate window, in which case it takes no space in its parent.
+    pub is_window: bool,
 }
 
 impl Default for Measurements {
@@ -213,6 +215,7 @@ impl Default for Measurements {
         Measurements {
             size: (0.0, 0.0).into(),
             baseline: None,
+            is_window: false
         }
     }
 }
@@ -223,6 +226,7 @@ impl Measurements {
         Measurements {
             size,
             baseline: None,
+            is_window: false
         }
     }
 

@@ -1,4 +1,13 @@
-use crate::{align_boxes, application::AppCtx, composable, event::{InputState, PointerButton, PointerEvent, PointerEventKind}, region::Region, Alignment, BoxConstraints, Cache, Environment, Event, EventCtx, InternalEvent, LayoutCtx, LayoutItem, Measurements, Offset, PaintCtx, Point, Rect, Size, Widget, WidgetId, WidgetPod, PhysicalSize};
+use crate::{
+    align_boxes,
+    application::AppCtx,
+    composable,
+    event::{InputState, KeyboardEvent, PointerButton, PointerEvent, PointerEventKind},
+    region::Region,
+    Alignment, BoxConstraints, Cache, Environment, Event, EventCtx, InternalEvent, LayoutCtx,
+    LayoutItem, Measurements, Offset, PaintCtx, PhysicalSize, Point, Rect, Size, Widget, WidgetId,
+    WidgetPod,
+};
 use keyboard_types::KeyState;
 use kyute_shell::{
     drawing::Color,
@@ -16,7 +25,6 @@ use std::{
     time::Instant,
 };
 use tracing::trace_span;
-use crate::event::KeyboardEvent;
 
 fn key_code_from_winit(
     input: &winit::event::KeyboardInput,
@@ -315,14 +323,14 @@ struct WindowState {
     last_click: Option<LastClick>,
     scale_factor: f64,
     invalid: Region,
-    needs_layout: bool,
 }
 
 impl WindowState {
     /// Window event processing.
     fn process_window_event(
         &mut self,
-        app_ctx: &mut AppCtx,
+        event_ctx: &mut EventCtx,
+        content_widget: &WidgetPod,
         window_event: &winit::event::WindowEvent,
     ) {
         let _span = trace_span!("process_window_event", ?window_event).entered();
@@ -347,13 +355,14 @@ impl WindowState {
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale_factor = *scale_factor;
+                event_ctx.request_relayout();
                 // TODO
                 None
             }
             WindowEvent::Resized(size) => {
                 if let Some(window) = self.window.as_mut() {
                     window.resize(PhysicalSize::new(size.width as f64, size.height as f64));
-                    self.needs_layout = true;
+                    event_ctx.request_relayout();
                 } else {
                     tracing::warn!("Resized event received but window has not been created");
                 }
@@ -531,27 +540,29 @@ impl WindowState {
                     // If nothing is grabbing the pointer, the pointer event is delivered to a widget
                     // that passes the hit-test
                     if let Some(id) = self.pointer_grab {
-                        // route event to target
-                        app_ctx.post_event(Event::Internal(InternalEvent::RouteEvent {
-                            target: id,
-                            event: Box::new(event.clone()),
-                        }));
+                        content_widget.event(
+                            event_ctx,
+                            &Event::Internal(InternalEvent::RouteEvent {
+                                target: id,
+                                event: Box::new(event.clone()),
+                            }),
+                        );
                     } else {
-                        // route event by hit-test
-                        app_ctx.post_event(Event::Internal(InternalEvent::RouteHitTestEvent {
-                            position: pointer_event.position,
-                            event: Box::new(event.clone()),
-                        }));
+                        // just forward to content
+                        content_widget.event(event_ctx, &event);
                     }
                 }
                 Event::Keyboard(ref k) => {
                     // keyboard events are delivered to the widget that has the focus.
                     // if no widget has focus, the event is dropped.
                     if let Some(focus) = self.focus {
-                        app_ctx.post_event(Event::Internal(InternalEvent::RouteEvent {
-                            target: focus,
-                            event: Box::new(event.clone()),
-                        }));
+                        content_widget.event(
+                            event_ctx,
+                            &Event::Internal(InternalEvent::RouteEvent {
+                                target: focus,
+                                event: Box::new(event.clone()),
+                            }),
+                        );
                     }
                 }
                 _ => {
@@ -626,9 +637,8 @@ impl Window {
                 hot: None,
                 inputs: Default::default(),
                 last_click: None,
-                scale_factor: 0.0,
+                scale_factor: 1.0, // initialized during window creation
                 invalid: Default::default(),
-                needs_layout: true,
             }))
         });
 
@@ -657,11 +667,12 @@ impl Widget for Window {
                 )
                 .expect("failed to create window");
                 ctx.register_window(window.id());
+                window_state.scale_factor = window.window().scale_factor();
                 window_state.window = Some(window);
             }
             Event::WindowEvent(window_event) => {
                 let mut window_state = self.window_state.borrow_mut();
-                window_state.process_window_event(ctx.app_ctx, window_event);
+                window_state.process_window_event(ctx, &self.contents, window_event);
             }
             Event::WindowRedrawRequest => {
                 let mut window_state = self.window_state.borrow_mut();
@@ -679,6 +690,7 @@ impl Widget for Window {
                         );
                         let mut invalid = Region::new();
                         invalid.add_rect(window_bounds);
+
                         let mut paint_ctx = PaintCtx {
                             draw_ctx: &mut wdc,
                             id: ctx.widget_id(),
@@ -723,7 +735,11 @@ impl Widget for Window {
         let mut m_window = Measurements::new(Size::new(width, height));
         let offset = align_boxes(Alignment::CENTER, &mut m_window, content_layout);
         self.contents.set_child_offset(offset);
-        Measurements::default()
+        Measurements {
+            size: Default::default(),
+            baseline: None,
+            is_window: true,
+        }
     }
 
     fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {

@@ -56,7 +56,7 @@ impl Widget for Text {
             .map(|m| m.baseline as f64);
 
         self.text_layout.replace(Some(text_layout));
-        Measurements { size, baseline }
+        Measurements { size, baseline, is_window: false }
     }
 
     fn paint(&self, ctx: &mut PaintCtx, _bounds: Rect, _env: &Environment) {

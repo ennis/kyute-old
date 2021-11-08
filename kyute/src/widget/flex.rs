@@ -74,6 +74,10 @@ impl Flex {
 }
 
 impl Widget for Flex {
+    fn debug_name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
+
     fn event(&self, ctx: &mut EventCtx, event: &Event) {
         for item in self.items.iter() {
             item.event(ctx, event);
@@ -110,11 +114,6 @@ impl Widget for Flex {
         //let spacing = env.get(theme::FlexSpacing);
         let spacing = 1.0;
 
-        let size = match axis {
-            Axis::Vertical => Size::new(cross_axis_len, constraints.constrain_height(d)),
-            Axis::Horizontal => Size::new(constraints.constrain_width(d), cross_axis_len),
-        };
-
         for i in 0..self.items.len() {
             let len = axis.main_len(item_measures[i].size());
             let offset = match axis {
@@ -126,10 +125,18 @@ impl Widget for Flex {
             d = d.ceil();
         }
 
+        let size = match axis {
+            Axis::Vertical => Size::new(cross_axis_len, constraints.constrain_height(d)),
+            Axis::Horizontal => Size::new(constraints.constrain_width(d), cross_axis_len),
+        };
+
         Measurements::new(size)
     }
 
     fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
-        ctx.clear(Color::new(0.5, 0.5, 0.5, 1.0));
+        ctx.clear(Color::new(0.1, 0.1, 0.3, 1.0));
+        for item in self.items.iter() {
+            item.paint(ctx, bounds, env);
+        }
     }
 }

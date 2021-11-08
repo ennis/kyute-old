@@ -34,7 +34,8 @@ pub struct AppCtx {
     ///
     /// Stores cached copies of widgets and state variables.
     pub(crate) cache: Cache,
-    pub(crate) redraw_requested: bool,
+    pub(crate) should_relayout: bool,
+    pub(crate) should_redraw: bool,
     pub(crate) pending_events: Vec<Event>,
 }
 
@@ -44,7 +45,8 @@ impl AppCtx {
         AppCtx {
             windows: HashMap::new(),
             cache: Cache::new(),
-            redraw_requested: false,
+            should_relayout: false,
+            should_redraw: false,
             pending_events: vec![],
         }
     }
@@ -69,6 +71,7 @@ impl AppCtx {
     }
 
     pub fn post_event(&mut self, event: Event) {
+        tracing::trace!("post_event {:?}", &event);
         self.pending_events.push(event);
     }
 
