@@ -24,17 +24,11 @@ impl Button {
             clicked: Cache::state(|| false),
         })
     }
-}
 
-impl WidgetPod<Button> {
     /// Returns whether this button has been clicked.
     pub fn clicked(&self) -> bool {
-        self.widget().clicked.0
+        self.clicked.0
     }
-}
-
-pub enum ButtonAction {
-    Clicked,
 }
 
 impl Widget for Button {
@@ -53,9 +47,11 @@ impl Widget for Button {
                     ctx.set_handled();
                 }
                 PointerEventKind::PointerOver => {
+                    tracing::trace!("button PointerOver");
                     ctx.request_redraw();
                 }
                 PointerEventKind::PointerOut => {
+                    tracing::trace!("button PointerOut");
                     ctx.request_redraw();
                 }
                 _ => {}

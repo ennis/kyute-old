@@ -1,9 +1,4 @@
-use kyute::{
-    application, composable,
-    widget::{Axis, Button, Flex, Text},
-    BoxConstraints, Cache, Data, Environment, Event, LayoutCtx, Measurements, PaintCtx, Rect,
-    Widget, WidgetPod, Window,
-};
+use kyute::{application, composable, widget::{Axis, Button, Flex, Text}, BoxConstraints, Cache, Data, Environment, Event, LayoutCtx, Measurements, PaintCtx, Rect, Widget, WidgetPod, Window, EventCtx};
 use kyute_shell::{platform::Platform, winit::window::WindowBuilder};
 use std::sync::Arc;
 
@@ -54,7 +49,9 @@ fn ui_function() -> WidgetPod {
             // List of items
             let mut item_list = vec![];
             for item in app_state.items.iter() {
-                item_list.push(Text::new(format!("{}", item)).into());
+                Cache::scoped(*item as usize,  || {
+                    item_list.push(Text::new(format!("{}", item)).into());
+                });
             }
             item_list.push(add_item_button.into());
             let flex = Flex::new(Axis::Vertical, item_list).into();

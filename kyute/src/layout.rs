@@ -1,12 +1,12 @@
 //! Types and functions used for layouting widgets.
-use crate::{Offset, Point, SideOffsets, Size, Data};
+use crate::{Data, Offset, Point, SideOffsets, Size};
+use kyute_shell::drawing::Rect;
 use std::{
     fmt,
     hash::{Hash, Hasher},
     ops::{Bound, RangeBounds},
+    sync::Arc,
 };
-use std::sync::Arc;
-use kyute_shell::drawing::Rect;
 
 /// Box constraints.
 #[derive(Copy, Clone)]
@@ -17,10 +17,10 @@ pub struct BoxConstraints {
 
 impl Data for BoxConstraints {
     fn same(&self, other: &Self) -> bool {
-        self.min.width.to_bits() == other.min.width.to_bits() &&
-        self.min.height.to_bits() == other.min.height.to_bits() &&
-        self.max.width.to_bits() == other.max.width.to_bits() &&
-        self.max.height.to_bits() == other.max.height.to_bits()
+        self.min.width.to_bits() == other.min.width.to_bits()
+            && self.min.height.to_bits() == other.min.height.to_bits()
+            && self.max.width.to_bits() == other.max.width.to_bits()
+            && self.max.height.to_bits() == other.max.height.to_bits()
     }
 }
 
@@ -210,12 +210,21 @@ pub struct Measurements {
     pub is_window: bool,
 }
 
+impl Hash for Measurements {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.size.width.to_bits().hash(state);
+        self.size.height.to_bits().hash(state);
+        self.baseline.map(|x| x.to_bits()).hash(state);
+        self.is_window.hash(state);
+    }
+}
+
 impl Default for Measurements {
     fn default() -> Self {
         Measurements {
             size: (0.0, 0.0).into(),
             baseline: None,
-            is_window: false
+            is_window: false,
         }
     }
 }
@@ -226,7 +235,7 @@ impl Measurements {
         Measurements {
             size,
             baseline: None,
-            is_window: false
+            is_window: false,
         }
     }
 
@@ -255,7 +264,6 @@ impl From<Size> for Measurements {
     }
 }
 
-
 #[derive(Clone)]
 struct LayoutItemImpl {
     measurements: Measurements,
@@ -280,7 +288,10 @@ impl LayoutItem {
         }))
     }
 
-    pub fn with_children(measurements: Measurements, children: Vec<(Offset,LayoutItem)>) -> LayoutItem {
+    pub fn with_children(
+        measurements: Measurements,
+        children: Vec<(Offset, LayoutItem)>,
+    ) -> LayoutItem {
         LayoutItem(Arc::new(LayoutItemImpl {
             measurements,
             children,

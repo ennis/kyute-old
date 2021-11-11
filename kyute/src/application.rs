@@ -71,7 +71,7 @@ impl AppCtx {
     }
 
     pub fn post_event(&mut self, event: Event) {
-        tracing::trace!("post_event {:?}", &event);
+        //tracing::trace!("post_event {:?}", &event);
         self.pending_events.push(event);
     }
 

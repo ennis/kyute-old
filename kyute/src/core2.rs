@@ -3,7 +3,7 @@ use crate::{
     bloom::Bloom,
     cache::{Cache, Key},
     call_key::CallId,
-    event::{InputState, PointerEvent},
+    event::{InputState, PointerEvent, PointerEventKind, PointerEventKind::PointerOut},
     layout::LayoutItem,
     region::Region,
     BoxConstraints, Data, Environment, Event, InternalEvent, Measurements, Offset, Point, Rect,
@@ -27,7 +27,15 @@ use std::{
 /// Context passed to widgets during the layout pass.
 ///
 /// See [`Widget::layout`].
-pub struct LayoutCtx {}
+pub struct LayoutCtx {
+    changed: bool,
+}
+
+impl LayoutCtx {
+    pub fn new() -> LayoutCtx {
+        LayoutCtx { changed: false }
+    }
+}
 
 pub struct PaintCtx<'a> {
     pub draw_ctx: &'a mut DrawContext,
@@ -51,8 +59,7 @@ impl<'a> PaintCtx<'a> {
 
     ///
     pub fn is_hovering(&self) -> bool {
-        false
-        // todo!()
+        self.hover
     }
 
     /*/// Returns the size of the node.
@@ -95,7 +102,8 @@ pub struct EventCtx<'a> {
     id: WidgetId,
     child_filter: Bloom<WidgetId>,
     handled: bool,
-    relayout: bool,
+    pub(crate) relayout: bool,
+    pub(crate) redraw: bool,
 }
 
 impl<'a> EventCtx<'a> {
@@ -112,6 +120,7 @@ impl<'a> EventCtx<'a> {
             child_filter: Default::default(),
             handled: false,
             relayout: false,
+            redraw: false,
         }
     }
 
@@ -135,7 +144,7 @@ impl<'a> EventCtx<'a> {
 
     /// Requests a redraw of the current node and its children.
     pub fn request_redraw(&mut self) {
-        self.app_ctx.should_redraw = true;
+        self.redraw = true;
     }
 
     pub fn request_recomposition(&mut self) {
@@ -144,7 +153,7 @@ impl<'a> EventCtx<'a> {
 
     /// Requests a relayout of the current widget.
     pub fn request_relayout(&mut self) {
-        self.app_ctx.should_relayout = true;
+        self.relayout = true;
     }
 
     /// Requests that the current node grabs all pointer events in the parent window.
@@ -227,18 +236,27 @@ impl fmt::Debug for WidgetId {
     }
 }
 
+#[derive(Copy, Clone, Debug, Hash)]
+struct LayoutResult {
+    constraints: BoxConstraints,
+    measurements: Measurements,
+}
+
 struct WidgetPodInner<T: ?Sized> {
     /// Unique ID of the widget.
     id: WidgetId,
     /// Position of this widget relative to its parent. Set by `WidgetPod::set_child_offset`.
     offset: Cell<Offset>,
-    /// The measurements (size+baseline) of this widget, result of the last layout calculation.
-    measurements: Cell<Option<Measurements>>,
+    /// Cached layout result.
+    layout_result: Cell<Option<LayoutResult>>,
     child_filter: Cell<Option<Bloom<WidgetId>>>,
     /// Indicates that this widget has been initialized.
     initialized: Cell<bool>,
     /// Indicates that the children of this widget have been initialized.
     children_initialized: Cell<bool>,
+    /// Any pointer hovering this widget
+    /// FIXME: handle multiple pointers?
+    pointer_over: Cell<bool>,
     widget: T,
 }
 
@@ -261,17 +279,32 @@ impl<T: Widget> WidgetPod<T> {
         // to determine whether the widget has been initialized.
         let initialized = !Cache::changed(()); // false on first call, true on following calls
 
+        tracing::trace!(
+            "WidgetPod::new[{}-{:?}]: initialized={}",
+            widget.debug_name(),
+            id,
+            initialized
+        );
         let inner = WidgetPodInner {
             id,
             offset: Cell::new(Offset::zero()),
-            measurements: Cell::new(Default::default()),
+            layout_result: Cell::new(None),
             child_filter: Cell::new(None),
             widget,
             initialized: Cell::new(initialized),
             // we don't know if all children have been initialized
             children_initialized: Cell::new(false),
+            pointer_over: Cell::new(false),
         };
         WidgetPod(Arc::new(inner))
+    }
+}
+
+impl<T: Widget + ?Sized> Deref for WidgetPod<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.widget
     }
 }
 
@@ -300,6 +333,12 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         &self.0.widget
     }
 
+    pub fn relayout(&self, constraints: BoxConstraints, env: &Environment) -> (Measurements, bool) {
+        let mut ctx = LayoutCtx { changed: false };
+        let measurements = self.layout(&mut ctx, constraints, env);
+        (measurements, ctx.changed)
+    }
+
     /// Called to measure this widget and layout the children of this widget.
     pub fn layout(
         &self,
@@ -307,14 +346,25 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         constraints: BoxConstraints,
         env: &Environment,
     ) -> Measurements {
-        if let Some(m) = self.0.measurements.get() {
-            m
-        } else {
-            let m = self.0.widget.layout(ctx, constraints, env);
-            tracing::trace!("layout {} -> {:?}", self.0.widget.debug_name(), m);
-            self.0.measurements.set(Some(m));
-            m
+        if let Some(layout_result) = self.0.layout_result.get() {
+            if layout_result.constraints.same(&constraints) {
+                return layout_result.measurements;
+            }
         }
+
+        let measurements = self.0.widget.layout(ctx, constraints, env);
+        tracing::trace!(
+            "layout[{}-{:?}]: {:?}",
+            self.0.widget.debug_name(),
+            self.0.id,
+            measurements
+        );
+        self.0.layout_result.set(Some(LayoutResult {
+            constraints,
+            measurements,
+        }));
+        ctx.changed = true;
+        measurements
     }
 
     pub fn set_child_offset(&self, offset: Offset) {
@@ -324,8 +374,8 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
     /// Paints the widget.
     pub fn paint(&self, ctx: &mut PaintCtx, bounds: Rect, env: &Environment) {
         let offset = self.0.offset.get();
-        let measurements = if let Some(m) = self.0.measurements.get() {
-            m
+        let measurements = if let Some(layout_result) = self.0.layout_result.get() {
+            layout_result.measurements
         } else {
             tracing::warn!("`paint` called before layout");
             return;
@@ -348,10 +398,7 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         // trace!(?ctx.scale_factor, ?ctx.inputs.pointers, ?window_bounds, "paint");
 
         let hover = ctx.inputs.pointers.iter().any(|(_, state)| {
-            window_bounds.contains(Point::new(
-                state.position.x * ctx.scale_factor,
-                state.position.y * ctx.scale_factor,
-            ))
+            window_bounds.contains(state.position)
         });
 
         ctx.draw_ctx.save();
@@ -386,6 +433,7 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
             tracing::trace!("computing child filter");
             // not computed: compute by sending the `UpdateChildFilter` message to the widget,
             // which will be forwarded to all children, which in turn will update `ctx.child_filter`.
+            // NOTE: we ignore any relayout/repaint requests during UpdateChildFilter
             let mut ctx = EventCtx::new(parent_ctx.app_ctx, parent_ctx.event_loop, self.0.id);
             self.0
                 .widget
@@ -405,6 +453,31 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         }
     }
 
+    fn do_event(&self, parent_ctx: &mut EventCtx, event: &Event) {
+        let offset = self.0.offset.get();
+        let window_position = parent_ctx.window_position + offset;
+        let mut ctx = EventCtx {
+            app_ctx: parent_ctx.app_ctx,
+            event_loop: parent_ctx.event_loop,
+            window_position,
+            id: self.0.id,
+            child_filter: Default::default(),
+            handled: false,
+            relayout: false,
+            redraw: false,
+        };
+        self.0.widget.event(&mut ctx, event);
+        if ctx.relayout {
+            tracing::trace!(widget_id = ?self.0.id, "requested relayout");
+            // relayout requested by the widget: invalidate cached measurements and offset
+            self.0.layout_result.set(None);
+            self.0.offset.set(Offset::zero());
+            // propagate relayout request to parent
+            parent_ctx.relayout = true;
+        }
+        parent_ctx.redraw |= ctx.redraw;
+    }
+
     /// Propagates an event to the wrapped widget.
     pub fn event(&self, parent_ctx: &mut EventCtx, event: &Event) {
         if parent_ctx.handled {
@@ -416,7 +489,7 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         match event {
             Event::Internal(InternalEvent::RouteWindowEvent { target, event }) => {
                 if *target == self.0.id {
-                    self.event(parent_ctx, &Event::WindowEvent(event.clone()));
+                    self.do_event(parent_ctx, &Event::WindowEvent(event.clone()));
                     return;
                 }
                 if !self.may_contain(*target) {
@@ -425,7 +498,7 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
             }
             Event::Internal(InternalEvent::RouteRedrawRequest(target)) => {
                 if *target == self.0.id {
-                    self.event(parent_ctx, &Event::WindowRedrawRequest);
+                    self.do_event(parent_ctx, &Event::WindowRedrawRequest);
                     return;
                 }
                 if !self.may_contain(*target) {
@@ -442,14 +515,11 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
                 // TODO explain the logic here
                 let init = self.0.initialized.get();
                 let child_init = self.0.children_initialized.get();
-                let mut child_ctx =
-                    EventCtx::new(parent_ctx.app_ctx, parent_ctx.event_loop, self.0.id);
                 match (init, child_init) {
-                    (false, _) => self.0.widget.event(&mut child_ctx, &Event::Initialize),
-                    (true, false) => self.0.widget.event(
-                        &mut child_ctx,
-                        &Event::Internal(InternalEvent::RouteInitialize),
-                    ),
+                    (false, _) => self.do_event(parent_ctx, &Event::Initialize),
+                    (true, false) => {
+                        self.do_event(parent_ctx, &Event::Internal(InternalEvent::RouteInitialize))
+                    }
                     _ => {}
                 }
                 self.0.initialized.set(true);
@@ -460,10 +530,10 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         }
 
         // ---- Handle pointer events, for which we must do hit-test ----
-        let adjusted_pointer_event;
+        let position_adjusted_event;
         let offset = self.0.offset.get();
-        let measurements = if let Some(m) = self.0.measurements.get() {
-            m
+        let measurements = if let Some(layout_result) = self.0.layout_result.get() {
+            layout_result.measurements
         } else {
             tracing::warn!("`event` called before layout ({:?})", event);
             return;
@@ -473,24 +543,40 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
 
         let modified_event = match event {
             Event::Pointer(pointer_event) => {
-                // check if position is inside this widget's bounds
-                tracing::trace!(
-                    "hit-test {} bounds={:?} position={:?}",
-                    self.0.widget.debug_name(),
-                    bounds,
-                    pointer_event.window_position
-                );
+                let adjusted_pointer_event = PointerEvent {
+                    position: (pointer_event.window_position - window_position).to_point(),
+                    ..*pointer_event
+                };
+                position_adjusted_event = Event::Pointer(adjusted_pointer_event);
+
                 if !bounds.contains(pointer_event.window_position) {
+                    // pointer hit-test fail; if we were hovering the widget, send pointerout
+                    if self.0.pointer_over.get() {
+                        self.0.pointer_over.set(false);
+                        self.do_event(
+                            parent_ctx,
+                            &Event::Pointer(PointerEvent {
+                                kind: PointerEventKind::PointerOut,
+                                ..adjusted_pointer_event
+                            }),
+                        );
+                    }
                     // pointer hit-test fail, don't recurse
                     return;
                 } else {
-                    // create new pointer event in local coordinates
-                    adjusted_pointer_event = Event::Pointer(PointerEvent {
-                        position: (pointer_event.window_position - window_position).to_point(),
-                        ..*pointer_event
-                    });
+                    // pointer hit-test pass; send pointerover
+                    if !self.0.pointer_over.get() {
+                        self.0.pointer_over.set(true);
+                        self.do_event(
+                            parent_ctx,
+                            &Event::Pointer(PointerEvent {
+                                kind: PointerEventKind::PointerOver,
+                                ..adjusted_pointer_event
+                            }),
+                        );
+                    }
                     // pointer event is modified
-                    &adjusted_pointer_event
+                    &position_adjusted_event
                 }
             }
             // send event as-is
@@ -498,24 +584,7 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         };
 
         // --- propagate to the widget inside ---
-        let mut ctx = EventCtx {
-            app_ctx: parent_ctx.app_ctx,
-            event_loop: parent_ctx.event_loop,
-            window_position,
-            id: self.0.id,
-            child_filter: Default::default(),
-            handled: false,
-            relayout: false,
-        };
-        self.0.widget.event(&mut ctx, modified_event);
-        if ctx.relayout {
-            tracing::trace!(widget_id = ?self.0.id, "requested relayout");
-            // relayout requested by the widget: invalidate cached measurements and offset
-            self.0.measurements.set(None);
-            self.0.offset.set(Offset::zero());
-            // propagate relayout request to parent
-            parent_ctx.relayout = true;
-        }
+        self.do_event(parent_ctx, modified_event);
     }
 
     /// Prepares the root `EventCtx` and calls `self.event()`.
@@ -546,8 +615,8 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
         self.root_layout(app_ctx);
     }
 
-    pub(crate) fn root_layout(&self, app_ctx: &mut AppCtx) -> Measurements {
-        let mut ctx = LayoutCtx {};
+    pub(crate) fn root_layout(&self, app_ctx: &mut AppCtx) -> bool {
+        let mut ctx = LayoutCtx { changed: false };
         let env = Environment::new();
         self.layout(
             &mut ctx,
@@ -556,6 +625,7 @@ impl<T: ?Sized + Widget> WidgetPod<T> {
                 max: Size::new(f64::INFINITY, f64::INFINITY),
             },
             &env,
-        )
+        );
+        ctx.changed
     }
 }

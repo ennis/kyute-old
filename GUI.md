@@ -788,3 +788,14 @@ how the data model can be updated.
 Reactive needs compiler support (through a macroDSL which will most likely prevent all IDE autocompletion), while caching can work with minimal macros.
 (Quoting Raph Levien on zulip: "how can you express UI using fairly vanilla language constructs?")
 
+## Inherent impl limitations
+Cannot impl `WidgetPod<MyWidget>` outside of kyute. However, `MyWidget::new` is supposed to return a `WidgetPod`, possibly from the cache.
+In any case, `MyWidget::new(...)` should return a cached object.
+-> `impl Deref<Target=MyWidget> for WidgetPod<T>`
+Minor issue: there's an ambiguity between `WidgetPod::event` and `Widget::event` accessible via Deref. 
+Maybe name the two differently, or somehow change their parameters?
+=> same with layout, event
+
+Alternatives:
+- 
+Currently, the `WidgetPod` is cached.
